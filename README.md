@@ -48,12 +48,14 @@ Add the folders to search (Windows folder picker or a pasted path, quotes accept
 to apply, **pick the right candidate for ambiguous files**, then apply the selection. Files Smode has not indexed
 yet are re-checked automatically.
 
-| 1. Analysis: ambiguous files, pick the right candidate | 2. All found, ready to apply | 3. Applied |
+| 1. Missing files | 2. Found after adding the folder where they now are | 3. Applied |
 |:---:|:---:|:---:|
-| <a href="docs/gui-relocate-1-analysis.png"><img src="docs/gui-relocate-1-analysis.png" width="280"></a> | <a href="docs/gui-relocate-2-found.png"><img src="docs/gui-relocate-2-found.png" width="280"></a> | <a href="docs/gui-relocate-3-applied.png"><img src="docs/gui-relocate-3-applied.png" width="280"></a> |
+| <a href="docs/gui-relocate-1-missing.png"><img src="docs/gui-relocate-1-missing.png" width="280"></a> | <a href="docs/gui-relocate-2-found.png"><img src="docs/gui-relocate-2-found.png" width="280"></a> | <a href="docs/gui-relocate-3-applied.png"><img src="docs/gui-relocate-3-applied.png" width="280"></a> |
 
 When several files share the name and none of them is closer to the old path, the file is marked **ambiguous**:
-pick the right candidate (the "Explorer" button helps to check), and only then can it be applied (step 1 above).
+pick the right candidate (the "Explorer" button helps to check), and only then can it be applied.
+
+<p align="center"><a href="docs/gui-relocate-ambiguous.png"><img src="docs/gui-relocate-ambiguous.png" width="620" alt="Relocate - ambiguous files, choosing the right candidate"></a></p>
 
 
 ### Consolidate

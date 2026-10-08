@@ -49,12 +49,14 @@ Ajouter les dossiers où chercher (sélecteur de dossier Windows ou chemin coll�
 **Analyser**, cocher ce qu'on applique, **choisir le bon candidat pour les fichiers ambigus**, puis appliquer la
 sélection. Les fichiers que Smode n'a pas encore indexés sont revérifiés automatiquement.
 
-| 1. Analyse : fichiers ambigus, choisir le bon candidat | 2. Tous retrouvés, prêts à appliquer | 3. Appliqué |
+| 1. Fichiers manquants | 2. Retrouvés après ajout du dossier où ils se trouvent | 3. Appliqué |
 |:---:|:---:|:---:|
-| <a href="docs/gui-relocate-1-analysis.png"><img src="docs/gui-relocate-1-analysis.png" width="280"></a> | <a href="docs/gui-relocate-2-found.png"><img src="docs/gui-relocate-2-found.png" width="280"></a> | <a href="docs/gui-relocate-3-applied.png"><img src="docs/gui-relocate-3-applied.png" width="280"></a> |
+| <a href="docs/gui-relocate-1-missing.png"><img src="docs/gui-relocate-1-missing.png" width="280"></a> | <a href="docs/gui-relocate-2-found.png"><img src="docs/gui-relocate-2-found.png" width="280"></a> | <a href="docs/gui-relocate-3-applied.png"><img src="docs/gui-relocate-3-applied.png" width="280"></a> |
 
 Quand plusieurs fichiers portent le même nom et qu'aucun n'est plus proche de l'ancien chemin, le fichier est marqué
-**ambigu** : choisir le bon candidat (le bouton « Explorateur » aide à vérifier) ; il ne peut être appliqué qu'ensuite (étape 1 ci-dessus).
+**ambigu** : choisir le bon candidat (le bouton « Explorateur » aide à vérifier) ; il ne peut être appliqué qu'ensuite.
+
+<p align="center"><a href="docs/gui-relocate-ambiguous.png"><img src="docs/gui-relocate-ambiguous.png" width="620" alt="Relocate - fichiers ambigus, choix du bon candidat"></a></p>
 
 
 ### Consolidate
