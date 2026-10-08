@@ -10,7 +10,7 @@
 # __________________________________________ ___________________________________________
 # |                                       | |                                         |
 # |    SMODE FILEMANAGER GUI              | | Graphical interface of the Filemanager, |
-# |       V0.12                           | | served by Smode (local HTTP server)     |
+# |       V0.13                           | | served by Smode (local HTTP server)     |
 # |                                       | | in an application window.               |
 # |_______________________________________| |_________________________________________|
 # |    Instructions:                      | | - Media: list, states, filters          |
@@ -64,6 +64,7 @@
 #                      window, Windows language by default); server messages in the chosen language;
 #                      French texts with accents. Pure ASCII .py file (accents as \u escapes).
 # V0.12 - 08/10/2026 - All comments translated to English.
+# V0.13 - 08/10/2026 - Favicon (white folder with an arrow on the app blue), shown in the window title bar.
 #
 # =============== OPTIONS (visible / editable in the Script panel) ===============
 SERVEUR: Oil.String("----------------------------------------")
@@ -86,7 +87,7 @@ import subprocess
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-FMG_VERSION = "0.12"
+FMG_VERSION = "0.13"
 FMG_SKIP_CLASSES = ('String', 'SrgbColor', 'Boolean', 'PositiveReal', 'Real', 'Percentage',
                     'UnboundedPercentage', 'Integer', 'Matrix4d')
 FMG_TYPE_FOLDERS = {"VideoFileContent": "VIDEO", "Color2dMipmaps": "IMAGE", "AudioFileContent": "AUDIO",
@@ -773,6 +774,7 @@ FMG_HTML = r"""<!doctype html>
 <html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Smode Filemanager</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234f8cff'/%3E%3Cpath d='M5.5 10.5a2 2 0 0 1 2-2h5.2l2.2 2.6h9.6a2 2 0 0 1 2 2v9.4a2 2 0 0 1-2 2h-17a2 2 0 0 1-2-2z' fill='%23fff'/%3E%3Cpath d='M11.5 17.6h8.2m-3-3.1 3.1 3.1-3.1 3.1' fill='none' stroke='%232f6fde' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
 :root{--bg:#121418;--panel:#1a1d23;--card:#20242b;--card2:#262b33;--fg:#e7e9ee;--mut:#9097a6;--line:#2e333c;
 --acc:#4f8cff;--acc2:#3a6fd8;--ok:#1fae63;--blue:#3b82f6;--amber:#d39b12;--orange:#e0702f;--violet:#9b5bd1;
