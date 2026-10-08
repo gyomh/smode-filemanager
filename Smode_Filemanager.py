@@ -9,64 +9,62 @@
 # -------------------- "Guillaume Henrion aka [GYOMH]" "08/10/2026" --------------------
 # __________________________________________ ___________________________________________
 # |                                       | |                                         |
-# |    SMODE FILEMANAGER                  | | RELOCATE : retrouve les fichiers        |
-# |       V0.6                            | | manquants meme deplaces et repartis     |
-# |    Relocate + Consolidate             | | autrement (recherche par nom).          |
+# |    SMODE FILEMANAGER                  | | RELOCATE: finds the missing files even  |
+# |       V0.7                            | | when moved and reorganised differently  |
+# |    Relocate + Consolidate             | | (search by file name).                  |
 # |_______________________________________| |_________________________________________|
-# |    Instructions :                     | | CONSOLIDATE : copie les medias dans     |
-# | 1- Mode : Relocate ou Consolidate     | | Destination / Scene / Type (VIDEO,      |
-# | 2- Relocate : Search Folders (;)      | | IMAGE, AUDIO, 3D), partages dans        |
-# |    Consolidate : Consolidate Folder   | | _COMMUN, puis repointe le projet.       |
-# |    (dans un Media Directory)          | | - Rapport HTML (navigateur)             |
-# | 3- Execute = rapport ; Apply Changes  | | - Rien n'est modifie sans Apply Changes |
-# |    + Execute = applique               | |                                         |
+# |    Instructions:                      | | CONSOLIDATE: copies the media into      |
+# | 1- Mode: Relocate or Consolidate      | | Destination / Scene / Type (VIDEO,      |
+# | 2- Relocate: Search Folders (;)       | | IMAGE, AUDIO, 3D), shared ones in       |
+# |    Consolidate: Consolidate Folder    | | _COMMUN, then relinks the project.      |
+# |    (inside a Media Directory)         | | - HTML report (browser)                 |
+# | 3- Execute = report; Apply Changes    | | - Nothing changes without Apply Changes |
+# |    + Execute = apply                  | |                                         |
 # |_______________________________________| |_________________________________________|
 #
-# HISTORIQUE
-# V0.1 - 08/10/2026 - Version initiale : scan des FileReference, index disque par nom,
-#                      score par dossiers communs, rapport texte, application optionnelle.
-# V0.2 - 08/10/2026 - Fichier retrouve hors de tout Media Directory : repointe en chemin
-#                      absolu (accepte par Smode, verifie) si Allow Absolute Paths est coche.
-# V0.3 - 08/10/2026 - Fix compile dans un Script Smode : declarations de parametres placees
-#                      avant les imports (ScriptStatementOrderException).
-# V0.4 - 08/10/2026 - Rapport HTML ouvert dans le navigateur : tuiles de compteurs cliquables
-#                      (filtre), une couleur par cas, boutons copier chemin/dossier par fichier,
-#                      utilisations depliables, clair/sombre. Option Open Report.
-#                      Conseil "Search Folders" affiche sur les fichiers introuvables.
-# V0.5 - 08/10/2026 - Mode Consolidate : copie vers Consolidate Folder / Scene / Type,
-#                      fichiers partages entre Scenes dans _COMMUN, collisions de noms suffixees,
-#                      copie identique reutilisee, packs Smode ignores, repointage verifie.
-#                      Liste deroulante Mode (Relocate / Consolidate). Panneau de parametres
-#                      organise en sections (GENERAL / RELOCATE / CONSOLIDATE / RAPPORT).
-#                      Liste Mode remplie des la compilation (expression lambda dans la declaration).
-#                      Rapport : chemin "avant" en gris au lieu de barre. Guillemets retires
-#                      autour des chemins saisis (Search Folders / Consolidate Folder).
-#                      Fichier copie pas encore indexe par Smode : reload + etat "En attente Smode"
-#                      (au lieu de "Echec"), aussi detecte au passage suivant.
-# V0.6 - 08/10/2026 - Relecture du code, corrections : dossiers de recherche imbriques (un meme fichier
-#                      n'est plus compte deux fois -> faux "ambigu") ; Media Directory a la racine d'un
-#                      lecteur reconnu ; copie via .fmgpart supprime en cas d'erreur + controle de l'espace
-#                      libre ; controle "destination en lecture seule" exact (plus de faux positif par prefixe) ;
-#                      Scene nommee CON, NUL, AUX, COM1... : dossier prefixe par _ (nom reserve Windows).
+# HISTORY
+# V0.1 - 08/10/2026 - First version: FileReference scan, disk index by name, score by common folders,
+#                      text report, optional apply.
+# V0.2 - 08/10/2026 - File found outside any Media Directory: relinked with an absolute path
+#                      (accepted by Smode, verified) when Allow Absolute Paths is ticked.
+# V0.3 - 08/10/2026 - Compile fix in a Smode Script: parameter declarations placed before the imports
+#                      (ScriptStatementOrderException).
+# V0.4 - 08/10/2026 - HTML report opened in the browser: clickable counter tiles (filter), one colour
+#                      per case, copy path / folder buttons per file, expandable uses, light / dark.
+#                      Open Report option. "Search Folders" tip shown on files not found.
+# V0.5 - 08/10/2026 - Consolidate mode: copy to Consolidate Folder / Scene / Type, files shared between
+#                      Scenes in _COMMUN, name collisions suffixed, identical copy reused, Smode packs
+#                      skipped, relink verified. Mode drop-down list (Relocate / Consolidate).
+#                      Parameter panel organised in sections (GENERAL / RELOCATE / CONSOLIDATE / RAPPORT).
+#                      Mode list filled at compile time (lambda expression in the declaration).
+#                      Report: "before" path in grey instead of struck through. Quotes removed around
+#                      typed paths (Search Folders / Consolidate Folder). Copied file not indexed by
+#                      Smode yet: reload + "Waiting for Smode" state (instead of "Failed"), also
+#                      detected on the next run.
+# V0.6 - 08/10/2026 - Code review, fixes: nested search folders (the same file is no longer counted
+#                      twice -> false "ambiguous"); Media Directory at a drive root recognised; copy
+#                      through a .fmgpart deleted on error + free space check; exact "read-only
+#                      destination" check (no more prefix false positive); Scene named CON, NUL, AUX,
+#                      COM1...: folder prefixed with _ (Windows reserved name).
+# V0.7 - 08/10/2026 - All comments translated to English.
 #
-
-# =============== OPTIONS (visibles/modifiables dans le panneau du Script) ===============
-# (Smode exige les declarations de parametres avant toute autre instruction, imports compris)
-# Les titres en MAJUSCULES sont de faux parametres qui servent de separateurs dans le panneau
-# (le libelle affiche = nom de la variable, les majuscules sont conservees ; valeur ignoree).
+# =============== OPTIONS (visible / editable in the Script panel) ===============
+# (Smode requires the parameter declarations before any other statement, imports included)
+# The UPPERCASE titles are dummy parameters used as separators in the panel
+# (the displayed label = variable name, upper case is kept; value ignored).
 GENERAL: Oil.String("----------------------------------------")
-# Mode : liste Relocate / Consolidate remplie DES LA COMPILATION (une seule expression : les declarations
-# doivent preceder toute instruction, donc pas de fonction ; sinon la liste reste vide jusqu'au 1er Execute)
+# Mode: Relocate / Consolidate list filled AT COMPILE TIME (a single expression: declarations must
+# precede any statement, so no function; otherwise the list stays empty until the 1st Execute)
 mode: (lambda e: ([e.enumerators.append((lambda n: (setattr(n, "label", lab), setattr(n, "value", i), n)[2])(Oil.createObject("CustomEnumerator"))) for i, lab in enumerate(("Relocate", "Consolidate"))], e.set("Relocate"), e)[2])(Oil.createObject("CustomEnumeration"))
-applyChanges: Oil.Boolean(False)   # decoche = rapport seul ; coche = applique (repointe / copie)
+applyChanges: Oil.Boolean(False)   # unticked = report only; ticked = apply (relink / copy)
 RELOCATE: Oil.String("----------------------------------------")
-searchFolders: Oil.String("")      # dossiers ou chercher, separes par ";" (vide = tous les Media Directories modifiables)
-allowAbsolutePaths: Oil.Boolean(True)   # fichier hors Media Directory : chemin disque absolu (non portable)
+searchFolders: Oil.String("")      # folders to search, separated by ";" (empty = all writable Media Directories)
+allowAbsolutePaths: Oil.Boolean(True)   # file outside any Media Directory: absolute disk path (not portable)
 CONSOLIDATE: Oil.String("----------------------------------------")
-consolidateFolder: Oil.String("")  # dossier de destination (doit etre dans un Media Directory)
+consolidateFolder: Oil.String("")  # destination folder (must be inside a Media Directory)
 RAPPORT: Oil.String("----------------------------------------")
-openReport: Oil.Boolean(True)      # ouvre le rapport HTML dans le navigateur a la fin
-status: Oil.String("")             # resume du dernier passage
+openReport: Oil.Boolean(True)      # opens the HTML report in the browser at the end
+status: Oil.String("")             # summary of the last run
 
 import os
 import re
@@ -80,7 +78,7 @@ REPORT_DIR = os.path.join(os.path.expanduser("~"), "Documents", "Smode Filemanag
 
 # ----------------------------- Media Directories -----------------------------
 def read_media_directories():
-    """[(nom, dossier absolu, lecture seule)] depuis la configuration Data_<version>.configuration de Smode."""
+    """[(name, absolute folder, read-only)] from the Smode Data_<version>.configuration file."""
     conf_dir = os.path.join(os.environ.get("APPDATA", ""), "Smode Compose", "configurations")
     files = sorted(glob.glob(os.path.join(conf_dir, "Data_*.configuration")), key=os.path.getmtime)
     if not files:
@@ -97,28 +95,28 @@ def read_media_directories():
 
 
 def _clean_path(p):
-    """Chemin saisi dans le panneau -> sans espaces ni guillemets autour ("Copier en tant que chemin d'acces")."""
+    """Path typed in the panel -> without surrounding spaces or quotes (Windows "Copy as path")."""
     return str(p).strip().strip('"\'').strip()
 
 
 def from_smode_path(path, media_dirs):
-    """'NomMediaDirectory/sous/dossier/fichier' (ou chemin absolu) -> chemin disque, None si inconnu."""
+    """'MediaDirectoryName/sub/folder/file' (or absolute path) -> disk path, None if unknown."""
     path = str(path).replace("\\", "/")
     if re.match(r"^[A-Za-z]:/", path):
         return os.path.abspath(path)
-    for name, d, _ in sorted(media_dirs, key=lambda m: -len(m[0])):   # nom le plus long d'abord
+    for name, d, _ in sorted(media_dirs, key=lambda m: -len(m[0])):   # longest name first
         if path.startswith(name + "/"):
             return os.path.join(d, *path[len(name) + 1:].split("/"))
     return None
 
 
 def _root(d):
-    """Dossier normalise pour comparer des chemins, sans separateur final (gere la racine d'un lecteur, ex. G:\\)."""
+    """Normalised folder for path comparisons, without trailing separator (handles a drive root, e.g. G:\\)."""
     return os.path.normcase(os.path.abspath(d)).rstrip(os.sep)
 
 
 def to_smode_path(abs_path, media_dirs):
-    """Chemin disque -> 'NomMediaDirectory/sous/dossier/fichier' (le Media Directory le plus profond gagne)."""
+    """Disk path -> 'MediaDirectoryName/sub/folder/file' (the deepest Media Directory wins)."""
     p = os.path.normcase(os.path.abspath(abs_path))
     best = None
     for name, d, _ in media_dirs:
@@ -131,9 +129,9 @@ def to_smode_path(abs_path, media_dirs):
     return best[0] + "/" + rel.replace(os.sep, "/")
 
 
-# ----------------------------- Scan du projet -----------------------------
+# ----------------------------- Project scan -----------------------------
 def scan_file_references(project):
-    """Toutes les FileReference du projet : [(chemin d'elements lisible, nom de la Scene, FileReference)]."""
+    """All FileReferences of the project: [(readable element path, Scene name, FileReference)]."""
     seen, refs = set(), []
 
     def kids(o):
@@ -161,7 +159,7 @@ def scan_file_references(project):
             uid = o.getUniqueIdentifier()
         except Exception:
             uid = None
-        if uid:                       # uid nul pour certains objets : ne pas dedupliquer dessus
+        if uid:                       # uid is null for some objects: do not deduplicate on it
             if uid in seen:
                 return
             seen.add(uid)
@@ -169,7 +167,7 @@ def scan_file_references(project):
             lab = o.label.get()
             if lab:
                 labels = labels + [str(lab)]
-                if cn == "Scene" and scene is None:   # 1re Scene sous la masterScene (sans label)
+                if cn == "Scene" and scene is None:   # 1st Scene under the masterScene (which has no label)
                     scene = str(lab)
         except Exception:
             pass
@@ -193,11 +191,11 @@ def is_missing(ref):
     return fo is None or fo.getOilClassName() == "MissingFile"
 
 
-# ----------------------------- Recherche disque -----------------------------
+# ----------------------------- Disk search -----------------------------
 def build_index(folders):
-    """nom de fichier (minuscule) -> [chemins absolus]. Ignore les .meta de Smode. Un dossier contenu dans un autre
-    de la liste n'est parcouru qu'une fois, et un meme fichier n'est jamais compte deux fois (sinon faux "ambigu")."""
-    roots = []                                    # (cle normalisee, dossier tel que saisi : on garde sa casse)
+    """file name (lower case) -> [absolute paths]. Ignores Smode .meta files. A folder contained in another one
+    of the list is walked only once, and the same file is never counted twice (otherwise a false "ambiguous")."""
+    roots = []                                    # (normalised key, folder as typed: its case is kept)
     for f in sorted(folders, key=lambda x: len(_root(x))):
         k = _root(f)
         if not any(k == rk or k.startswith(rk + os.sep) for rk, _ in roots):
@@ -217,7 +215,7 @@ def build_index(folders):
 
 
 def score(old_path, candidate):
-    """Nombre de dossiers communs (en partant du fichier) entre l'ancien chemin Smode et le candidat."""
+    """Number of common folders (starting from the file) between the old Smode path and the candidate."""
     old_dirs = [s.lower() for s in old_path.split("/")[:-1]]
     new_dirs = [s.lower() for s in os.path.dirname(candidate).split(os.sep)]
     n = 0
@@ -225,12 +223,12 @@ def score(old_path, candidate):
         if a != b:
             break
         n += 1
-    common = len(set(old_dirs) & set(new_dirs))   # departage secondaire : dossiers communs n'importe ou
+    common = len(set(old_dirs) & set(new_dirs))   # secondary tie-break: common folders anywhere
     return (n, common)
 
 
 def resolve(old_path, index):
-    """-> ('found', candidat) | ('ambiguous', [candidats]) | ('notfound', None)"""
+    """-> ('found', candidate) | ('ambiguous', [candidates]) | ('notfound', None)"""
     cands = index.get(old_path.split("/")[-1].lower(), [])
     if not cands:
         return "notfound", None
@@ -242,8 +240,8 @@ def resolve(old_path, index):
     return "ambiguous", ranked
 
 
-# ----------------------------- Rapport HTML -----------------------------
-# etats : cle -> (libelle, couleur, explication)
+# ----------------------------- HTML report -----------------------------
+# states: key -> (label, colour, explanation)
 RELOCATE_STATES = {
     "applied":     ("Applique",                 "#1a9e55", "Fichier repointe et verifie"),
     "applied_abs": ("Applique (chemin absolu)", "#c98a00", "Repointe hors Media Directory : chemin non portable"),
@@ -325,7 +323,7 @@ def _esc(t):
 
 
 def _copy_btn(text, label):
-    """Bouton qui copie un chemin dans le presse-papier (les liens file:/// sont bloques par les navigateurs)."""
+    """Button copying a path to the clipboard (file:/// links are blocked by browsers)."""
     return ' <button class="cp" data-p="%s" title="%s">%s</button>' % (_esc(text), _esc(text), label)
 
 
@@ -403,7 +401,7 @@ def run(project, search_folders="", apply=False, allow_absolute=True, open_repor
         folders = [d for _, d, ro in media_dirs if not ro]
     folders = [f for f in folders if os.path.isdir(f)]
 
-    missing = {}                                   # ancien chemin -> [(labels, ref)]
+    missing = {}                                   # old path -> [(labels, ref)]
     for labels, _, ref in scan_file_references(project):
         path = str(ref.path.get())
         if path and is_missing(ref):
@@ -472,9 +470,9 @@ def media_type_folder(ref_class, path):
 
 
 def _safe_name(name):
-    """Nom de Scene -> nom de dossier Windows valide."""
+    """Scene name -> valid Windows folder name."""
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip().rstrip(".")
-    if re.match(r"^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$", name, re.I):   # noms reserves par Windows
+    if re.match(r"^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$", name, re.I):   # names reserved by Windows
         name = "_" + name
     return name or "_SANS_NOM"
 
@@ -487,8 +485,8 @@ def _same_file(a, b):
 
 
 def _copy_file(src, dst):
-    """Copie via un fichier .fmgpart renomme a la fin : en cas d'erreur (disque plein...) le fichier partiel est
-    supprime au lieu de rester sur le disque. Verifie d'abord l'espace libre."""
+    """Copy through a .fmgpart file renamed at the end: on error (disk full...) the partial file is deleted
+    instead of staying on the disk. Checks the free space first."""
     import shutil
     free = shutil.disk_usage(os.path.dirname(dst)).free
     size = os.path.getsize(src)
@@ -521,7 +519,7 @@ def consolidate(project, dest_folder, apply=False, open_report=False):
     elif any(ro and (_root(dest) + os.sep).startswith(_root(d) + os.sep) for _, d, ro in media_dirs):
         error = "Le dossier de destination est dans un Media Directory en lecture seule."
 
-    # source absolue -> {refs, users, scenes, ref_class, smode_path}
+    # absolute source -> {refs, users, scenes, ref_class, smode_path}
     files = {}
     missing, missing_refs = {}, {}
     for labels, scene, ref in scan_file_references(project):
@@ -548,13 +546,13 @@ def consolidate(project, dest_folder, apply=False, open_report=False):
     for p, u in sorted(missing.items()):
         on_disk = from_smode_path(p, media_dirs)
         if on_disk and os.path.isfile(on_disk):
-            # present sur le disque mais pas encore indexe par Smode (copie recente) : rechargement
+            # on disk but not indexed by Smode yet (recent copy): reload
             for r in missing_refs[p]:
                 r.reload.trig()
             entries.append({"state": "pending", "old": p, "old_abs": on_disk, "users": u})
         else:
             entries.append({"state": "missing", "old": p, "users": u})
-    used_targets = {}                             # cible (normcase) -> source, pour eviter les collisions de noms
+    used_targets = {}                             # target (normcase) -> source, to avoid name collisions
     for src in sorted(files, key=lambda s: s.lower()):
         f = files[src]
         e = {"old": f["smode"], "old_abs": src, "users": f["users"]}
@@ -589,7 +587,7 @@ def consolidate(project, dest_folder, apply=False, open_report=False):
             if not still:
                 e["state"] = "reused" if reused else "copied"
             elif os.path.exists(target):
-                # Smode indexe les fichiers fraichement copies en differe : forcer le rechargement
+                # Smode indexes freshly copied files with a delay: force the reload
                 for r in still:
                     r.reload.trig()
                 e["state"] = "pending"
@@ -617,9 +615,9 @@ def consolidate(project, dest_folder, apply=False, open_report=False):
     return summary, report, lines
 
 
-# ----------------------------- Lancement -----------------------------
+# ----------------------------- Launch -----------------------------
 def _ensure_mode_enum():
-    """Peuple la liste deroulante Mode (CustomEnumeration vide a la declaration, cf. smode-oil-reference)."""
+    """Fills the Mode drop-down list (CustomEnumeration empty at declaration, see smode-oil-reference)."""
     if len(script.mode.enumerators) == 0:
         for i, lab in enumerate(("Relocate", "Consolidate")):
             en = Oil.createObject("CustomEnumerator")
@@ -631,7 +629,7 @@ def _ensure_mode_enum():
 
 if "FM_NO_RUN" not in globals():
     _ensure_mode_enum()
-    for _title in ("GENERAL", "RELOCATE", "CONSOLIDATE", "RAPPORT"):   # separateurs remis en place s'ils ont ete edites
+    for _title in ("GENERAL", "RELOCATE", "CONSOLIDATE", "RAPPORT"):   # separators restored if they were edited
         setattr(script, _title, "-" * 40)
     if str(script.mode.get()) == "Consolidate":
         _summary, _report, _ = consolidate(script.project, str(script.consolidateFolder), bool(script.applyChanges),

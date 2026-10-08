@@ -9,69 +9,70 @@
 # -------------------- "Guillaume Henrion aka [GYOMH]" "08/10/2026" --------------------
 # __________________________________________ ___________________________________________
 # |                                       | |                                         |
-# |    SMODE FILEMANAGER GUI              | | Interface graphique du Filemanager,     |
-# |       V0.11                           | | servie par Smode (serveur HTTP local)   |
-# |                                       | | dans une fenetre d'application.         |
+# |    SMODE FILEMANAGER GUI              | | Graphical interface of the Filemanager, |
+# |       V0.12                           | | served by Smode (local HTTP server)     |
+# |                                       | | in an application window.               |
 # |_______________________________________| |_________________________________________|
-# |    Instructions :                     | | - Medias : liste, etats, filtres        |
-# | 1- Glisser le script dans le projet   | | - Relocate : recherche, choix des       |
-# | 2- Launch Mode = At Every Update      | |   ambigus, application selective        |
-# | 3- La fenetre s'ouvre toute seule     | | - Consolidate : Scene / Type, copie     |
-# |    (ou cocher Open Interface)         | |   en arriere-plan avec progression      |
-# | 4- Tout se fait dans la fenetre       | | - Ecoute 127.0.0.1 uniquement           |
+# |    Instructions:                      | | - Media: list, states, filters          |
+# | 1- Drag the script into the project   | | - Relocate: search, pick ambiguous      |
+# | 2- Launch Mode = At Every Update      | |   candidates, selective apply           |
+# | 3- The window opens by itself         | | - Consolidate: Scene / Type, copy       |
+# |    (or tick Open Interface)           | |   in the background with progress       |
+# | 4- Everything happens in the window   | | - Listens on 127.0.0.1 only             |
 # |_______________________________________| |_________________________________________|
 #
-# HISTORIQUE
-# V0.1 - 08/10/2026 - Premiere version : serveur HTTP 127.0.0.1 integre (queue + thread principal
-#                      pour Oil, travail disque en arriere-plan), interface Edge --app, onglets
-#                      Medias / Relocate / Consolidate / Media Directories.
-# V0.2 - 08/10/2026 - Consolidate : bouton de mise a jour des Media Directories + relecture auto
-#                      toutes les 3 s tant que la destination n'est dans aucun Media Directory
-#                      (analyse relancee des qu'un nouveau dossier apparait).
-# V0.3 - 08/10/2026 - Consolidate : la liste affiche le Media Directory qui contient la destination
-#                      ("Nom > sous-dossier" si sous-dossier, "Hors Media Directory" en orange sinon).
-# V0.4 - 08/10/2026 - Medias : recherche avec portee (Nom + Scene par defaut, Nom, Scene, Chemins,
-#                      Partout), compteur de resultats, tuiles recalculees sur la recherche, surlignage.
-# V0.5 - 08/10/2026 - Medias : bouton croix a gauche du champ pour effacer la recherche (ou Echap).
-# V0.6 - 08/10/2026 - Bouton d'effacement : croix dessinee en SVG centree, survol bleu comme les autres boutons.
-# V0.7 - 08/10/2026 - Listes deroulantes : contour bleu au survol / focus ; cases et boutons radio bleus.
-# V0.8 - 08/10/2026 - Listes deroulantes dessinees par l'interface (surbrillance bleue de l'app au lieu de
-#                      celle de Windows), clavier fleches / Entree / Echap, "Hors Media Directory" en orange.
-# V0.9 - 08/10/2026 - Relecture du code, corrections :
-#                      - dossiers de recherche imbriques : un meme fichier n'est plus compte deux fois
-#                        (faux "Ambigu" avec deux chemins identiques) ;
-#                      - Media Directory a la racine d'un lecteur (ex. G:\) reconnu ;
-#                      - port deja pris : plus de tentative de demarrage a chaque frame ;
-#                      - copie annulee / en erreur : le fichier partiel .fmgpart est supprime ; espace disque
-#                        verifie avant la copie (et affiche dans le plan) ;
-#                      - API en POST uniquement (une page web ne peut plus declencher Explorateur / dialogue /
-#                        scan par un simple lien), 404 pour les chemins inconnus ;
-#                      - voyant orange quand le Script ne tourne plus, erreur immediate au lieu d'attendre 2 min ;
-#                      - Relocate : dossiers introuvables signales ; candidats en chemin absolu ecartes si les
-#                        chemins absolus sont desactives ;
-#                      - fichiers "En attente Smode" jamais reconnus : passes en Echec apres 40 s ; un seul
-#                        rescan du projet a la fin au lieu d'un par fichier ;
-#                      - erreurs reseau gerees (suivi de copie, Parcourir) ; rappel d'enregistrer le projet ;
-#                      - survol bleu partout (croix des dossiers, Annuler, tuiles, onglets) ;
-#                      - Scene nommee CON, NUL, AUX, COM1... : dossier prefixe par _ (nom reserve Windows).
-# V0.10 - 08/10/2026 - Auto Open : la fenetre s'ouvre aussi quand le projet est rouvert (ou le Script ajoute)
-#                      sans relancer Smode (avant : seulement au 1er demarrage du serveur dans la session).
-#                      Pas de 2e fenetre si une fenetre est deja ouverte : elle recharge le projet toute seule.
-#                      Au redemarrage du Script, les references Oil de l'ancien projet sont oubliees et un
-#                      consolidate en cours est annule.
-# V0.11 - 08/10/2026 - Interface bilingue : selecteur FR / EN en haut a droite (memorise dans la fenetre,
-#                      par defaut la langue de Windows) ; messages du serveur dans la langue choisie ;
-#                      textes francais accentues. Fichier .py en ASCII pur (accents en sequences \u).
+# HISTORY
+# V0.1 - 08/10/2026 - First version: built-in HTTP server on 127.0.0.1 (queue + main thread for Oil,
+#                      disk work in the background), Edge --app window, tabs
+#                      Media / Relocate / Consolidate / Media Directories.
+# V0.2 - 08/10/2026 - Consolidate: button to reload the Media Directories + automatic reload every 3 s
+#                      while the destination is in no Media Directory (analysis rerun as soon as a new
+#                      folder appears).
+# V0.3 - 08/10/2026 - Consolidate: the list shows the Media Directory containing the destination
+#                      ("Name > subfolder" for a subfolder, "Outside Media Directories" in orange).
+# V0.4 - 08/10/2026 - Media: search with a scope (Name + Scene by default, Name, Scene, Paths,
+#                      Everywhere), result counter, tiles recomputed on the search, highlighting.
+# V0.5 - 08/10/2026 - Media: cross button left of the field to clear the search (or Esc).
+# V0.6 - 08/10/2026 - Clear button: centred SVG cross, blue hover like the other buttons.
+# V0.7 - 08/10/2026 - Drop-down lists: blue outline on hover / focus; blue checkboxes and radio buttons.
+# V0.8 - 08/10/2026 - Drop-down lists drawn by the interface (app blue highlight instead of the Windows
+#                      one), keyboard arrows / Enter / Esc, "Outside Media Directories" in orange.
+# V0.9 - 08/10/2026 - Code review, fixes:
+#                      - nested search folders: the same file is no longer counted twice
+#                        (false "Ambiguous" with two identical paths);
+#                      - Media Directory at a drive root (e.g. G:\) recognised;
+#                      - port already taken: no more start attempt on every frame;
+#                      - cancelled / failed copy: the partial .fmgpart file is deleted; disk space
+#                        checked before copying (and shown in the plan);
+#                      - POST-only API (a web page can no longer trigger Explorer / dialog / scan with
+#                        a simple link), 404 for unknown paths;
+#                      - orange dot when the Script no longer runs, immediate error instead of a
+#                        2 min wait;
+#                      - Relocate: missing search folders reported; absolute-path candidates dropped
+#                        when absolute paths are disabled;
+#                      - "Waiting for Smode" files never recognised: Failed after 40 s; a single
+#                        project rescan at the end instead of one per file;
+#                      - network errors handled (copy progress, Browse); reminder to save the project;
+#                      - blue hover everywhere (folder crosses, Cancel, tiles, tabs);
+#                      - Scene named CON, NUL, AUX, COM1...: folder prefixed with _ (Windows reserved).
+# V0.10 - 08/10/2026 - Auto Open: the window also opens when the project is reopened (or the Script
+#                      added) without restarting Smode (before: only on the 1st server start of the
+#                      session). No 2nd window if one is already open: it reloads the project by
+#                      itself. On a Script restart, Oil references of the old project are dropped and
+#                      a running consolidate is cancelled.
+# V0.11 - 08/10/2026 - Bilingual interface: FR / EN selector at the top right (remembered in the
+#                      window, Windows language by default); server messages in the chosen language;
+#                      French texts with accents. Pure ASCII .py file (accents as \u escapes).
+# V0.12 - 08/10/2026 - All comments translated to English.
 #
-
-# =============== OPTIONS (visibles/modifiables dans le panneau du Script) ===============
+# =============== OPTIONS (visible / editable in the Script panel) ===============
 SERVEUR: Oil.String("----------------------------------------")
-port: Oil.PositiveInteger(8893)          # port local de l'interface (127.0.0.1 uniquement)
-openInterface: Oil.Boolean(False)        # cocher = ouvre la fenetre (se decoche tout seul)
-autoOpen: Oil.Boolean(True)              # ouvre la fenetre quand le Script demarre (Smode lance, projet rouvert...)
-restartServer: Oil.Boolean(False)        # cocher = redemarre le serveur (se decoche tout seul)
+port: Oil.PositiveInteger(8893)          # local port of the interface (127.0.0.1 only)
+openInterface: Oil.Boolean(False)        # tick = opens the window (unticks itself)
+autoOpen: Oil.Boolean(True)              # opens the window when the Script starts (Smode launched, project reopened...)
+restartServer: Oil.Boolean(False)        # tick = restarts the server (unticks itself)
 ETAT: Oil.String("----------------------------------------")
-status: Oil.String("")                   # adresse de l'interface / erreurs
+status: Oil.String("")                   # interface address / errors
 
 import os
 import re
@@ -85,7 +86,7 @@ import subprocess
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-FMG_VERSION = "0.11"
+FMG_VERSION = "0.12"
 FMG_SKIP_CLASSES = ('String', 'SrgbColor', 'Boolean', 'PositiveReal', 'Real', 'Percentage',
                     'UnboundedPercentage', 'Integer', 'Matrix4d')
 FMG_TYPE_FOLDERS = {"VideoFileContent": "VIDEO", "Color2dMipmaps": "IMAGE", "AudioFileContent": "AUDIO",
@@ -97,18 +98,18 @@ FMG_EXT_FOLDERS = {"VIDEO": (".mov", ".mp4", ".avi", ".mxf", ".mkv", ".webm", ".
 FMG_SHARED = "_COMMUN"
 FMG_NO_SCENE = "_PROJET"
 
-# Etat persistant entre les frames (le Script tourne a chaque update ; les globals sont partages entre
-# Scripts, d'ou le prefixe _FMG / fmg_ partout).
+# State kept between frames (the Script runs on every update; globals are shared between Scripts,
+# hence the _FMG / fmg_ prefix everywhere).
 if "_FMG" not in globals():
     _FMG = {"queue": queue.Queue(), "servers": [], "version": None, "port": None,
             "refs": {}, "job": None, "lock": threading.Lock()}
-_FMG.setdefault("tick", time.time())     # cles ajoutees en V0.9+ (un _FMG d'une version precedente peut etre en memoire)
+_FMG.setdefault("tick", time.time())     # keys added in V0.9+ (an _FMG from a previous version may be in memory)
 _FMG.setdefault("busy", False)
-_FMG.setdefault("last_poll", 0.0)        # derniere requete /api/info d'une fenetre ouverte
-_FMG.setdefault("session", 0)            # +1 a chaque (re)demarrage du Script (projet rouvert...)
-_FMG.setdefault("tls", threading.local())  # langue de la requete en cours (par thread)
+_FMG.setdefault("last_poll", 0.0)        # last /api/info request from an open window
+_FMG.setdefault("session", 0)            # +1 on each Script (re)start (project reopened...)
+_FMG.setdefault("tls", threading.local())  # language of the current request (per thread)
 
-# Messages du serveur dans la langue choisie dans l'interface (envoyee avec chaque requete)
+# Server messages in the language chosen in the interface (sent with each request)
 FMG_MSG = {
     "fr": {"dead": "Smode ne traite plus les demandes : le Script Smode Filemanager GUI est-il toujours dans le projet "
                    "ouvert, actif, en Launch Mode 'At Every Update' ?",
@@ -145,13 +146,13 @@ def fmg_t(key, *args):
     return msg % args if args else msg
 
 
-# ===================================== CHEMINS / DISQUE (sans Oil) =====================================
+# ===================================== PATHS / DISK (no Oil) =====================================
 def fmg_clean_path(p):
     return str(p).strip().strip('"\'').strip()
 
 
 def fmg_media_dirs():
-    """[(nom, dossier, lecture seule)] depuis %APPDATA%\\Smode Compose\\configurations\\Data_*.configuration."""
+    """[(name, folder, read-only)] from %APPDATA%\\Smode Compose\\configurations\\Data_*.configuration."""
     conf_dir = os.path.join(os.environ.get("APPDATA", ""), "Smode Compose", "configurations")
     files = sorted(glob.glob(os.path.join(conf_dir, "Data_*.configuration")), key=os.path.getmtime)
     if not files:
@@ -168,7 +169,7 @@ def fmg_media_dirs():
 
 
 def fmg_root(d):
-    """Dossier normalise pour comparer des chemins, sans separateur final (gere la racine d'un lecteur, ex. G:\\)."""
+    """Normalised folder for path comparisons, without trailing separator (handles a drive root, e.g. G:\\)."""
     return os.path.normcase(os.path.abspath(d)).rstrip(os.sep)
 
 
@@ -200,9 +201,9 @@ def fmg_in_readonly(abs_path, media_dirs):
 
 
 def fmg_build_index(folders):
-    """nom de fichier (minuscule) -> [chemins]. Un dossier contenu dans un autre de la liste n'est parcouru qu'une
-    fois, et un meme fichier n'est jamais compte deux fois (sinon faux cas "ambigu" avec deux chemins identiques)."""
-    roots = []                                    # (cle normalisee, dossier tel que saisi : on garde sa casse)
+    """file name (lower case) -> [paths]. A folder contained in another one of the list is walked only once,
+    and the same file is never counted twice (otherwise a false "ambiguous" case with two identical paths)."""
+    roots = []                                    # (normalised key, folder as typed: its case is kept)
     for f in sorted(folders, key=lambda x: len(fmg_root(x))):
         k = fmg_root(f)
         if not any(k == rk or k.startswith(rk + os.sep) for rk, _ in roots):
@@ -257,7 +258,7 @@ def fmg_type_folder(cls, path):
 
 def fmg_safe_name(name):
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip().rstrip(".")
-    if re.match(r"^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$", name, re.I):   # noms reserves par Windows
+    if re.match(r"^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$", name, re.I):   # names reserved by Windows
         name = "_" + name
     return name or "_SANS_NOM"
 
@@ -286,7 +287,7 @@ def fmg_fmt_size(n):
 
 
 def fmg_free_space(path):
-    """Espace libre sur le disque de path (le dossier peut ne pas encore exister : on remonte au parent existant)."""
+    """Free space on the drive of path (the folder may not exist yet: walk up to the existing parent)."""
     p = os.path.abspath(path)
     while not os.path.exists(p):
         parent = os.path.dirname(p)
@@ -299,14 +300,14 @@ def fmg_free_space(path):
         return None
 
 
-# ===================================== TACHES OIL (thread principal) =====================================
+# ===================================== OIL TASKS (main thread) =====================================
 def fmg_is_missing(ref):
     fo = ref.file.get()
     return fo is None or fo.getOilClassName() == "MissingFile"
 
 
 def fmg_walk_refs(project):
-    """[(labels, scene, ref)] pour toutes les FileReference du projet."""
+    """[(labels, scene, ref)] for every FileReference of the project."""
     seen, refs = set(), []
 
     def kids(o):
@@ -362,7 +363,7 @@ def fmg_walk_refs(project):
 
 
 def fmg_task_scan(_arg):
-    """Toutes les references, regroupees par chemin Smode. Garde les refs Oil pour les ecritures."""
+    """All references, grouped by Smode path. Keeps the Oil refs for the writes."""
     project = script.project
     groups, refs_by_path = {}, {}
     for labels, scene, ref in fmg_walk_refs(project):
@@ -389,7 +390,7 @@ def fmg_task_scan(_arg):
 
 
 def fmg_task_set_paths(changes):
-    """changes = [(ancien chemin Smode, nouveau)] -> {ancien: 'ok' | 'pending' | 'failed'}."""
+    """changes = [(old Smode path, new)] -> {old: 'ok' | 'pending' | 'failed'}."""
     out = {}
     for old, new in changes:
         refs = _FMG["refs"].get(old, [])
@@ -408,7 +409,7 @@ def fmg_task_set_paths(changes):
 
 
 def fmg_task_check(paths):
-    """Etat actuel de chemins Smode ; recharge ceux encore manquants."""
+    """Current state of Smode paths; reloads the ones still missing."""
     out = {}
     for p in paths:
         refs = _FMG["refs"].get(p, [])
@@ -426,12 +427,12 @@ FMG_TASKS = {"scan": fmg_task_scan, "set_paths": fmg_task_set_paths, "check": fm
 
 
 def fmg_alive():
-    """Vrai si le Script tourne encore (frame recente, ou tache Oil en cours sur le thread principal)."""
+    """True if the Script still runs (recent frame, or an Oil task running on the main thread)."""
     return _FMG["busy"] or time.time() - _FMG["tick"] < 5
 
 
 def fmg_main(task, arg=None, timeout=120):
-    """Execute une tache Oil sur le thread principal (Script en At Every Update) et attend le resultat."""
+    """Runs an Oil task on the main thread (Script in At Every Update) and waits for the result."""
     if not fmg_alive():
         raise RuntimeError(fmg_t("dead"))
     box = {"task": task, "arg": arg, "result": None, "error": None, "done": threading.Event()}
@@ -457,9 +458,9 @@ def fmg_process_queue():
         box["done"].set()
 
 
-# ===================================== LOGIQUE (thread HTTP, sans Oil) =====================================
+# ===================================== LOGIC (HTTP thread, no Oil) =====================================
 def fmg_items_view(scan, media_dirs):
-    """Liste des medias pour l'onglet Medias."""
+    """Media list for the Media tab."""
     out = []
     for g in scan["items"]:
         if g["missing"]:
@@ -479,7 +480,7 @@ def fmg_items_view(scan, media_dirs):
 def fmg_relocate_analyze(folders, allow_absolute):
     media_dirs = fmg_media_dirs()
     folders = [fmg_clean_path(f) for f in folders if fmg_clean_path(f)]
-    bad = [f for f in folders if not os.path.isdir(f)]            # saisis par l'utilisateur mais introuvables
+    bad = [f for f in folders if not os.path.isdir(f)]            # typed by the user but not found
     if not folders:
         folders = [d for _, d, ro in media_dirs if not ro]
     folders = [f for f in folders if os.path.isdir(f)]
@@ -500,7 +501,7 @@ def fmg_relocate_analyze(folders, allow_absolute):
             else:
                 e.update(state="found" if new else "found_abs", new=new or cand, abs=cand)
         elif kind == "ambiguous":
-            # chemins absolus desactives : on ecarte les candidats hors Media Directory
+            # absolute paths disabled: drop the candidates outside the Media Directories
             ok = [c for c in cand if allow_absolute or fmg_to_smode(c, media_dirs) is not None]
             if not ok:
                 e.update(state="outside", abs=cand[0], new=cand[0])
@@ -558,8 +559,8 @@ def fmg_consolidate_plan(dest):
 
 
 def fmg_copy_with_progress(src, dst, job):
-    """Copie par blocs dans un .fmgpart renomme a la fin ; le fichier partiel est supprime en cas d'erreur ou
-    d'annulation (sinon des Go de fichier tronque resteraient sur le disque)."""
+    """Chunked copy into a .fmgpart file renamed at the end; the partial file is deleted on error or
+    cancellation (otherwise GBs of truncated file would stay on the disk)."""
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     tmp = dst + ".fmgpart"
     done0 = job["done_bytes"]
@@ -585,7 +586,7 @@ def fmg_copy_with_progress(src, dst, job):
 
 
 def fmg_consolidate_job(dest, selected, lang="fr"):
-    _FMG["tls"].lang = lang                   # messages du thread de copie dans la langue de l'interface
+    _FMG["tls"].lang = lang                   # copy-thread messages in the interface language
     job = _FMG["job"]
     try:
         plan = fmg_consolidate_plan(dest)
@@ -619,9 +620,9 @@ def fmg_consolidate_job(dest, selected, lang="fr"):
     job["current"] = ""
 
 
-# ===================================== OUTILS SYSTEME =====================================
+# ===================================== SYSTEM TOOLS =====================================
 def fmg_browse_folder(initial=""):
-    """Boite de dialogue Windows de choix de dossier (PowerShell, hors du process Smode)."""
+    """Windows folder picker dialog (PowerShell, outside the Smode process)."""
     ps = ("Add-Type -AssemblyName System.Windows.Forms;"
           "$f = New-Object System.Windows.Forms.FolderBrowserDialog;"
           "$f.Description = 'Smode Filemanager';$f.ShowNewFolderButton = $true;"
@@ -653,7 +654,7 @@ def fmg_open_window(url):
     os.startfile(url)
 
 
-# ===================================== SERVEUR HTTP =====================================
+# ===================================== HTTP SERVER =====================================
 class FmgHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
@@ -672,8 +673,8 @@ class FmgHandler(BaseHTTPRequestHandler):
                 origin and origin not in ("http://127.0.0.1:%d" % port_, "http://localhost:%d" % port_)):
             return self._send(403, {"error": "acces refuse"})
         path = urllib.parse.urlparse(self.path).path
-        # L'API n'accepte que POST : une page web etrangere peut declencher un GET (<img src=...>) sans en-tete
-        # Origin, mais un POST de sa part porte toujours son Origin (refuse ci-dessus).
+        # The API only accepts POST: a foreign web page can trigger a GET (<img src=...>) without an Origin
+        # header, but a POST from it always carries its Origin (refused above).
         if path.startswith("/api/") and method != "POST":
             return self._send(405, {"error": "methode non autorisee"})
         if method == "GET" and path not in ("/", "/index.html"):
@@ -717,7 +718,7 @@ def fmg_api(path, data):
         return fmg_relocate_analyze(data.get("folders") or [], bool(data.get("allowAbsolute", True)))
     if path == "/api/relocate/apply":
         changes = [(c["old"], c["new"]) for c in data.get("changes", [])]
-        fmg_main("scan")                       # references fraiches
+        fmg_main("scan")                       # fresh references
         return {"results": fmg_main("set_paths", changes)}
     if path == "/api/consolidate/plan":
         return fmg_consolidate_plan(data.get("dest", ""))
@@ -924,7 +925,7 @@ animation:sp 0.8s linear infinite;vertical-align:-2px}@keyframes sp{to{transform
 </main>
 <div id="toast"></div>
 <script>
-/* ---------------- langues ---------------- */
+/* ---------------- languages ---------------- */
 var I18N={
 fr:{proj:'Projet',rescan:'Rescanner le projet',tabMedias:'M\u00e9dias',langTitle:'Langue de l\'interface',
  clearTitle:'Effacer la recherche (\u00c9chap)',searchPh:'Rechercher...',scopeTitle:'O\u00f9 chercher',scopeNs:'Nom du fichier + Scene',
@@ -1018,7 +1019,7 @@ function initialLang(){var l=null;try{l=localStorage.getItem('fmg_lang')}catch(e
  if(l!=='fr'&&l!=='en')l=(navigator.language||'').toLowerCase().indexOf('fr')===0?'fr':'en';return l}
 var S={items:[],mfilter:'*',rFolders:[],reloc:null,rFilter:'*',plan:null,cFilter:'*',dirs:[],job:null,session:null,
  lang:initialLang(),scanning:false,alive:undefined};
-/* t('cle', a, b...) : texte dans la langue choisie, {0} {1}... remplaces par les arguments */
+/* t('key', a, b...): text in the chosen language, {0} {1}... replaced by the arguments */
 function t(k){var v=I18N[S.lang][k];if(v==null)v=I18N.fr[k];if(v==null)v=k;var a=arguments;
  return String(v).replace(/\{(\d+)\}/g,function(m,i){return a[+i+1]!=null?a[+i+1]:''})}
 function LAB(s){return I18N[S.lang].LAB[s]||s}
@@ -1047,7 +1048,7 @@ function api(path,data){var d=data||{};d.lang=S.lang;
  return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})
  .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||r.status);return j})},
  function(e){setDot(null);throw new Error(t('noResp'))})}
-/* voyant : vert = Smode traite les demandes, orange = serveur joignable mais Script inactif, rouge = serveur injoignable */
+/* status dot: green = Smode processes requests, orange = server reachable but Script inactive, red = server unreachable */
 function setDot(alive){S.alive=alive;if(alive===undefined)return;var d=$('dot');d.className='dot '+(alive===null?'off':alive?'on':'warn');
  d.title=alive===null?t('dotOff'):alive?t('dotOn'):t('dotWarn')}
 function copy(x){if(navigator.clipboard)navigator.clipboard.writeText(x);toast(t('copied',x))}
@@ -1065,14 +1066,14 @@ document.querySelectorAll('nav button').forEach(function(b){b.onclick=function()
  document.querySelectorAll('nav button').forEach(function(x){x.classList.toggle('on',x===b)});
  document.querySelectorAll('.tab').forEach(function(x){x.classList.toggle('on',x.id==='t-'+b.dataset.t)})}});
 
-/* ---------------- MEDIAS ---------------- */
+/* ---------------- MEDIA ---------------- */
 function scan(){S.scanning=true;renderMedias();
  return api('/api/scan').then(function(r){S.items=r.items;S.scanning=false;$('proj').textContent=r.project;renderMedias()})
  .catch(function(e){S.scanning=false;$('m-list').innerHTML='<div class="err">'+esc(e.message)+'</div>'})}
-/* surligne q dans x (texte brut -> HTML echappe) */
+/* highlights q in x (plain text -> escaped HTML) */
 function hl(x,q){x=String(x==null?'':x);if(!q)return esc(x);var lo=x.toLowerCase(),out='',i=0,j;
  while((j=lo.indexOf(q,i))>=0){out+=esc(x.slice(i,j))+'<mark>'+esc(x.slice(j,j+q.length))+'</mark>';i=j+q.length}return out+esc(x.slice(i))}
-/* champs fouilles selon la portee choisie */
+/* fields searched for the chosen scope */
 function mFields(e,sc){var name=base(e.path),scenes=e.scenes.join(' ');
  if(sc==='name')return name;if(sc==='scene')return scenes;if(sc==='path')return e.path+' '+(e.abs||'');
  if(sc==='all')return name+' '+scenes+' '+e.path+' '+(e.abs||'')+' '+e.users.join(' ');return name+' '+scenes}
@@ -1146,7 +1147,7 @@ function applyReloc(){var r=S.reloc,ch=[],map={};
 
 /* ---------------- CONSOLIDATE ---------------- */
 function normP(p){return String(p||'').trim().replace(/^["']|["']$/g,'').replace(/\//g,'\\').replace(/\\+$/,'').toLowerCase()}
-/* la liste affiche le Media Directory qui contient la destination (ou "hors Media Directory") */
+/* the list shows the Media Directory containing the destination (or "outside Media Directories") */
 function syncMd(){syncMd0();ddRefresh($('c-md'))}
 function syncMd0(){var d=normP($('c-dest').value),sel=$('c-md'),best=null;
  S.dirs.forEach(function(m){if(m.readOnly)return;var r=normP(m.dir);if((d===r||d.indexOf(r+'\\')===0)&&(!best||r.length>normP(best.dir).length))best=m});
@@ -1164,7 +1165,7 @@ function mdRefresh(silent){var before=S.dirs.length;return loadInfo().then(funct
  if(!silent)toast(t('mdCount',S.dirs.length)+(S.dirs.length>before?t('mdNew',S.dirs.length-before):''));
  if(S.plan&&S.plan.error&&$('c-dest').value)$('c-run').onclick()})}
 $('c-mdref').onclick=function(){mdRefresh(false)};
-/* destination hors Media Directory : on relit la liste toutes les 3 s (Smode l'enregistre en differe) */
+/* destination outside Media Directories: reload the list every 3 s (Smode saves it with a delay) */
 setInterval(function(){if(S.plan&&S.plan.error&&$('c-dest').value&&!(S.job&&S.job.running)){var n=S.dirs.length;
  loadInfo().then(function(){if(S.dirs.length!==n){toast(t('mdDetected'));$('c-run').onclick()}})}},3000);
 $('c-browse').onclick=function(){api('/api/browse',{initial:$('c-dest').value}).then(function(r){if(r.path){$('c-dest').value=r.path;syncMd()}})
@@ -1212,9 +1213,9 @@ function pollJob(){fetch('/api/job',{method:'POST'}).then(function(r){return r.j
   if(pend.length)watchPending(pend,'plan')}},
  function(){toast(t('retry'),1);setTimeout(pollJob,2000)})}
 
-/* ---------------- verification des fichiers en attente ---------------- */
-/* reverifie toutes les 2 s (40 s max) ; un seul rescan du projet a la fin (un scan gele Smode quelques
-   secondes sur un gros projet) ; au-dela, les fichiers jamais reconnus passent en Echec avec une explication */
+/* ---------------- check of the waiting files ---------------- */
+/* re-checks every 2 s (40 s max); a single project rescan at the end (a scan freezes Smode for a few
+   seconds on a large project); after that, files never recognised become Failed with an explanation */
 function watchPending(paths,where,n){n=n||0;var list=where==='reloc'?(S.reloc&&S.reloc.entries):(S.plan&&S.plan.entries);
  function redraw(){where==='reloc'?renderReloc():renderPlan()}
  if(!paths.length){scan();return}
@@ -1227,7 +1228,7 @@ function watchPending(paths,where,n){n=n||0;var list=where==='reloc'?(S.reloc&&S
   watchPending(left,where,n+1)},function(){watchPending(paths,where,n+1)})},2000)}
 
 /* ---------------- MEDIA DIRECTORIES ---------------- */
-/* le Script a redemarre dans Smode (projet rouvert...) : on repart de zero sur le projet actuel */
+/* the Script restarted in Smode (project reopened...): start again from scratch on the current project */
 function checkSession(s){if(s==null)return;if(S.session==null){S.session=s;return}if(s===S.session)return;S.session=s;
  S.reloc=null;S.plan=null;S.job=null;$('r-out').innerHTML='';$('c-out').innerHTML='';
  toast(t('reloaded'));scan();loadInfo()}
@@ -1237,14 +1238,14 @@ function loadInfo(){return api('/api/info').then(function(r){S.dirs=r.mediaDirs;
  $('c-md').innerHTML='<option value=""></option>'+r.mediaDirs.filter(function(d){return !d.readOnly}).map(function(d){
   return '<option value="'+esc(d.dir)+'">'+esc(d.name)+'</option>'}).join('');syncMd()})}
 $('d-refresh').onclick=loadInfo;
-/* ---------------- listes deroulantes maison (la surbrillance d'un <select> natif est imposee par Windows) ---------------- */
+/* ---------------- custom drop-down lists (the highlight of a native <select> is forced by Windows) ---------------- */
 function ddRefresh(sel){var w=sel._dd;if(!w)return;var o=sel.options[sel.selectedIndex];w.lab.textContent=o?o.textContent:'';
  w.btn.classList.toggle('warn',sel.dataset.warn==='1');w.btn.title=sel.title||''}
 function makeDD(sel){var w=document.createElement('div');w.className='dd';sel.parentNode.insertBefore(w,sel);w.appendChild(sel);sel.style.display='none';
  var btn=document.createElement('button');btn.type='button';btn.className='dd-btn';btn.title=sel.title||'';
  btn.innerHTML='<span class="dd-lab"></span><svg width="10" height="6" viewBox="0 0 10 6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
  var list=document.createElement('div');list.className='dd-list';w.appendChild(btn);w.appendChild(list);
- list.onmousedown=function(e){e.preventDefault()};   /* garde le focus : la barre de defilement ne ferme plus la liste */
+ list.onmousedown=function(e){e.preventDefault()};   /* keeps the focus: the scrollbar no longer closes the list */
  sel._dd={btn:btn,lab:btn.firstChild};var act=-1,opts=[];
  function close(){w.classList.remove('open')}
  function mark(){opts.forEach(function(o,i){o.el.classList.toggle('act',i===act)});if(opts[act])opts[act].el.scrollIntoView({block:'nearest'})}
@@ -1270,23 +1271,23 @@ setInterval(function(){fetch('/api/info',{method:'POST'}).then(function(r){retur
 </script></body></html>"""
 
 
-# ===================================== BOUCLE (chaque frame) =====================================
+# ===================================== LOOP (every frame) =====================================
 _fmg_port = int(script.port.get())
 _fmg_now = time.time()
 for _t in ("SERVEUR", "ETAT"):
     if str(getattr(script, _t)) != "-" * 40:
         setattr(script, _t, "-" * 40)
-# Le Script (re)demarre : premier passage de la session Smode, ou il ne tournait plus depuis quelques secondes
-# (projet ferme puis rouvert, Script ajoute au projet, Script repasse en At Every Update). Le serveur et _FMG,
-# eux, survivent a la fermeture du projet : on ne peut donc pas se fier au seul demarrage du serveur.
+# The Script (re)starts: first run of the Smode session, or it had not run for a few seconds (project closed
+# and reopened, Script added to the project, Script set back to At Every Update). The server and _FMG survive
+# closing the project, so the server start alone cannot be relied on.
 _fmg_resumed = _FMG["version"] is None or _fmg_now - _FMG["tick"] > 3
 if _fmg_resumed:
     _FMG["session"] += 1
-    _FMG["refs"] = {}                      # references Oil de l'ancien projet : ne plus jamais s'en servir
+    _FMG["refs"] = {}                      # Oil references of the old project: never use them again
     if _FMG["job"] and _FMG["job"].get("running"):
         _FMG["job"]["cancel"] = True
-# (Re)demarrage du serveur seulement au premier passage, si la version ou le port change, ou sur Restart Server.
-# Un echec (port deja pris) n'est PAS retente a chaque frame : changer le port ou cocher Restart Server.
+# (Re)start the server only on the first run, when the version or the port changes, or on Restart Server.
+# A failure (port already taken) is NOT retried on every frame: change the port or tick Restart Server.
 _fmg_restart = bool(script.restartServer.get())
 if _FMG["version"] != FMG_VERSION or _FMG["port"] != _fmg_port or _fmg_restart:
     if _fmg_restart:
@@ -1298,8 +1299,8 @@ if script.openInterface.get():
     if _FMG["servers"]:
         fmg_open_window(_fmg_url)
 elif _fmg_resumed and script.autoOpen.get() and _FMG["servers"]:
-    # Une fenetre ouverte interroge le serveur toutes les 5 s (au moins 1 fois/min si elle est reduite) :
-    # dans ce cas pas de 2e fenetre, celle qui est ouverte recharge le projet toute seule (session).
+    # An open window polls the server every 5 s (at least once a minute when minimised): in that case no
+    # 2nd window, the open one reloads the project by itself (session).
     if _fmg_now - _FMG["last_poll"] > 70:
         fmg_open_window(_fmg_url)
 _FMG["tick"] = time.time()
