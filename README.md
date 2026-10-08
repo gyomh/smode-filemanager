@@ -44,7 +44,7 @@ file, its size, and "Explorer" / "Copy" buttons.
 
 ### Relocate
 
-Add the folders to search (Windows folder picker or a pasted path, quotes accepted), click **Analyser**, tick what
+Add the folders to search (Windows folder picker or a pasted path, quotes accepted), click **Analyse**, tick what
 to apply, **pick the right candidate for ambiguous files**, then apply the selection. Files Smode has not indexed
 yet are re-checked automatically.
 
@@ -59,8 +59,8 @@ pick the right candidate (the "Explorer" button helps to check), and only then c
 ### Consolidate
 
 Choose the destination (folder picker or the list of your Media Directories, which shows the one containing the
-destination), click **Analyser**: the plan is grouped by Scene / type, with the total to copy and the free space on
-the destination drive. **Consolider la selection** copies in the background with a progress bar and a cancel button;
+destination), click **Analyse**: the plan is grouped by Scene / type, with the total to copy and the free space on
+the destination drive. **Consolidate selection** copies in the background with a progress bar and a cancel button;
 a cancelled or failed copy leaves no partial file behind.
 
 | 1. Plan (Scene / type, size, free space) | 2. Copy in progress | 3. Done, project relinked to the copies |
