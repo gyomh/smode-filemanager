@@ -2,7 +2,7 @@
 
 *[Version française](README.fr.md)*
 
-> **Experimental, not an official Smode tool.** Built by trial and error against the Oil API (see [smode-oil-reference](https://github.com/gyomh/smode-oil-reference)). Tested on Smode Compose R15. The interface, messages and reports are in French.
+> **Experimental, not an official Smode tool.** Built by trial and error against the Oil API (see [smode-oil-reference](https://github.com/gyomh/smode-oil-reference)). Tested on Smode Compose R15. The GUI is in English or French (selector at the top right); the classic script and its report are in French.
 
 Smode has no relink function and no structured consolidate. This repository adds both:
 
@@ -30,6 +30,9 @@ The Script embeds a small web server on `127.0.0.1:8893` (this machine only) and
 application window (Microsoft Edge `--app` mode, no address bar). Smode keeps running while you work in it: the disk
 search and the file copies happen in the background.
 
+The **FR / EN** selector at the top right switches the language of the whole interface (remembered; the default
+follows the Windows language).
+
 The dot next to the project name shows the link with Smode: **green** = connected, **orange** = the Script no longer
 runs (project closed, Script removed or not in *At Every Update*), **red** = server unreachable.
 
@@ -48,6 +51,11 @@ yet are re-checked automatically.
 | 1. Missing files, not in the Media Directories | 2. After adding the folder where they now are | 3. Applied |
 |:---:|:---:|:---:|
 | <a href="docs/gui-relocate-1-introuvables.png"><img src="docs/gui-relocate-1-introuvables.png" width="280"></a> | <a href="docs/gui-relocate-2-retrouves.png"><img src="docs/gui-relocate-2-retrouves.png" width="280"></a> | <a href="docs/gui-relocate-3-appliques.png"><img src="docs/gui-relocate-3-appliques.png" width="280"></a> |
+
+When several files share the name and none of them is closer to the old path, the file is marked **ambiguous**:
+pick the right candidate (the "Explorer" button helps to check), and only then can it be applied.
+
+<p align="center"><a href="docs/gui-relocate-ambigu.png"><img src="docs/gui-relocate-ambigu.png" width="620" alt="Relocate - ambiguous files, choosing the right candidate"></a></p>
 
 ### Consolidate
 

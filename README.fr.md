@@ -2,7 +2,7 @@
 
 *[English version](README.md)*
 
-> **Expérimental, pas un outil officiel Smode.** Construit par essais et erreurs sur l'API Oil (voir [smode-oil-reference](https://github.com/gyomh/smode-oil-reference)). Testé sur Smode Compose R15.
+> **Expérimental, pas un outil officiel Smode.** Construit par essais et erreurs sur l'API Oil (voir [smode-oil-reference](https://github.com/gyomh/smode-oil-reference)). Testé sur Smode Compose R15. La GUI est en français ou en anglais (sélecteur en haut à droite) ; le script classique et son rapport sont en français.
 
 Smode n'a ni fonction de relink ni consolidate structuré. Ce dépôt ajoute les deux :
 
@@ -31,6 +31,9 @@ Le Script embarque un petit serveur web sur `127.0.0.1:8893` (cette machine seul
 fenêtre d'application (Microsoft Edge en mode `--app`, sans barre d'adresse). Smode continue de tourner pendant qu'on
 s'en sert : la recherche sur le disque et les copies se font en arrière-plan.
 
+Le sélecteur **FR / EN** en haut à droite change la langue de toute l'interface (mémorisée ; par défaut, celle de
+Windows).
+
 Le voyant à côté du nom du projet indique le lien avec Smode : **vert** = connecté, **orange** = le Script ne tourne
 plus (projet fermé, Script supprimé ou pas en *At Every Update*), **rouge** = serveur injoignable.
 
@@ -49,6 +52,11 @@ sélection. Les fichiers que Smode n'a pas encore indexés sont revérifiés aut
 | 1. Fichiers manquants, absents des Media Directories | 2. Après ajout du dossier où ils se trouvent maintenant | 3. Appliqué |
 |:---:|:---:|:---:|
 | <a href="docs/gui-relocate-1-introuvables.png"><img src="docs/gui-relocate-1-introuvables.png" width="280"></a> | <a href="docs/gui-relocate-2-retrouves.png"><img src="docs/gui-relocate-2-retrouves.png" width="280"></a> | <a href="docs/gui-relocate-3-appliques.png"><img src="docs/gui-relocate-3-appliques.png" width="280"></a> |
+
+Quand plusieurs fichiers portent le même nom et qu'aucun n'est plus proche de l'ancien chemin, le fichier est marqué
+**ambigu** : choisir le bon candidat (le bouton « Explorateur » aide à vérifier) ; il ne peut être appliqué qu'ensuite.
+
+<p align="center"><a href="docs/gui-relocate-ambigu.png"><img src="docs/gui-relocate-ambigu.png" width="620" alt="Relocate - fichiers ambigus, choix du bon candidat"></a></p>
 
 ### Consolidate
 

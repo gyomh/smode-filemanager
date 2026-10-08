@@ -10,7 +10,7 @@
 # __________________________________________ ___________________________________________
 # |                                       | |                                         |
 # |    SMODE FILEMANAGER GUI              | | Interface graphique du Filemanager,     |
-# |       V0.9                            | | servie par Smode (serveur HTTP local)   |
+# |       V0.11                           | | servie par Smode (serveur HTTP local)   |
 # |                                       | | dans une fenetre d'application.         |
 # |_______________________________________| |_________________________________________|
 # |    Instructions :                     | | - Medias : liste, etats, filtres        |
@@ -54,13 +54,21 @@
 #                      - erreurs reseau gerees (suivi de copie, Parcourir) ; rappel d'enregistrer le projet ;
 #                      - survol bleu partout (croix des dossiers, Annuler, tuiles, onglets) ;
 #                      - Scene nommee CON, NUL, AUX, COM1... : dossier prefixe par _ (nom reserve Windows).
+# V0.10 - 08/10/2026 - Auto Open : la fenetre s'ouvre aussi quand le projet est rouvert (ou le Script ajoute)
+#                      sans relancer Smode (avant : seulement au 1er demarrage du serveur dans la session).
+#                      Pas de 2e fenetre si une fenetre est deja ouverte : elle recharge le projet toute seule.
+#                      Au redemarrage du Script, les references Oil de l'ancien projet sont oubliees et un
+#                      consolidate en cours est annule.
+# V0.11 - 08/10/2026 - Interface bilingue : selecteur FR / EN en haut a droite (memorise dans la fenetre,
+#                      par defaut la langue de Windows) ; messages du serveur dans la langue choisie ;
+#                      textes francais accentues. Fichier .py en ASCII pur (accents en sequences \u).
 #
 
 # =============== OPTIONS (visibles/modifiables dans le panneau du Script) ===============
 SERVEUR: Oil.String("----------------------------------------")
 port: Oil.PositiveInteger(8893)          # port local de l'interface (127.0.0.1 uniquement)
 openInterface: Oil.Boolean(False)        # cocher = ouvre la fenetre (se decoche tout seul)
-autoOpen: Oil.Boolean(True)              # ouvre la fenetre au demarrage du serveur
+autoOpen: Oil.Boolean(True)              # ouvre la fenetre quand le Script demarre (Smode lance, projet rouvert...)
 restartServer: Oil.Boolean(False)        # cocher = redemarre le serveur (se decoche tout seul)
 ETAT: Oil.String("----------------------------------------")
 status: Oil.String("")                   # adresse de l'interface / erreurs
@@ -77,7 +85,7 @@ import subprocess
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-FMG_VERSION = "0.9"
+FMG_VERSION = "0.11"
 FMG_SKIP_CLASSES = ('String', 'SrgbColor', 'Boolean', 'PositiveReal', 'Real', 'Percentage',
                     'UnboundedPercentage', 'Integer', 'Matrix4d')
 FMG_TYPE_FOLDERS = {"VideoFileContent": "VIDEO", "Color2dMipmaps": "IMAGE", "AudioFileContent": "AUDIO",
@@ -94,8 +102,47 @@ FMG_NO_SCENE = "_PROJET"
 if "_FMG" not in globals():
     _FMG = {"queue": queue.Queue(), "servers": [], "version": None, "port": None,
             "refs": {}, "job": None, "lock": threading.Lock()}
-_FMG.setdefault("tick", time.time())     # cles ajoutees en V0.9 (un _FMG d'une version precedente peut etre en memoire)
+_FMG.setdefault("tick", time.time())     # cles ajoutees en V0.9+ (un _FMG d'une version precedente peut etre en memoire)
 _FMG.setdefault("busy", False)
+_FMG.setdefault("last_poll", 0.0)        # derniere requete /api/info d'une fenetre ouverte
+_FMG.setdefault("session", 0)            # +1 a chaque (re)demarrage du Script (projet rouvert...)
+_FMG.setdefault("tls", threading.local())  # langue de la requete en cours (par thread)
+
+# Messages du serveur dans la langue choisie dans l'interface (envoyee avec chaque requete)
+FMG_MSG = {
+    "fr": {"dead": "Smode ne traite plus les demandes : le Script Smode Filemanager GUI est-il toujours dans le projet "
+                   "ouvert, actif, en Launch Mode 'At Every Update' ?",
+           "timeout": "Smode ne r\u00e9pond pas (Script bien en Launch Mode 'At Every Update' ?)",
+           "destEmpty": "Indiquer le dossier de destination.",
+           "destNotMd": "Ce dossier n'est dans aucun Media Directory. L'ajouter dans Smode (panneau Media Directories), "
+                        "attendre quelques secondes (Smode enregistre la liste en diff\u00e9r\u00e9) puis relancer l'analyse.",
+           "destRo": "Ce dossier est dans un Media Directory en lecture seule.",
+           "noSpace": "Espace insuffisant sur le disque de destination : %s \u00e0 copier, %s libres.",
+           "cancelled": "annul\u00e9", "jobRunning": "un consolidate est d\u00e9j\u00e0 en cours",
+           "notFound": "introuvable : %s", "unknown": "endpoint inconnu : %s",
+           "units": ("o", "Ko", "Mo", "Go", "To")},
+    "en": {"dead": "Smode no longer processes requests: is the Smode Filemanager GUI Script still in the open project, "
+                   "active, in Launch Mode 'At Every Update'?",
+           "timeout": "Smode is not responding (is the Script in Launch Mode 'At Every Update'?)",
+           "destEmpty": "Enter the destination folder.",
+           "destNotMd": "This folder is not inside any Media Directory. Add it in Smode (Media Directories panel), wait "
+                        "a few seconds (Smode saves the list with a delay), then analyse again.",
+           "destRo": "This folder is inside a read-only Media Directory.",
+           "noSpace": "Not enough space on the destination drive: %s to copy, %s free.",
+           "cancelled": "cancelled", "jobRunning": "a consolidate is already running",
+           "notFound": "not found: %s", "unknown": "unknown endpoint: %s",
+           "units": ("B", "KB", "MB", "GB", "TB")},
+}
+
+
+def fmg_lang():
+    lang = getattr(_FMG["tls"], "lang", "fr")
+    return lang if lang in FMG_MSG else "fr"
+
+
+def fmg_t(key, *args):
+    msg = FMG_MSG[fmg_lang()][key]
+    return msg % args if args else msg
 
 
 # ===================================== CHEMINS / DISQUE (sans Oil) =====================================
@@ -230,11 +277,12 @@ def fmg_size(p):
 
 
 def fmg_fmt_size(n):
-    for unit in ("o", "Ko", "Mo", "Go"):
+    units = fmg_t("units")
+    for i, unit in enumerate(units[:-1]):
         if n < 1024:
-            return "%.0f %s" % (n, unit) if unit == "o" else "%.1f %s" % (n, unit)
+            return "%.0f %s" % (n, unit) if i == 0 else "%.1f %s" % (n, unit)
         n /= 1024.0
-    return "%.1f To" % n
+    return "%.1f %s" % (n, units[-1])
 
 
 def fmg_free_space(path):
@@ -385,12 +433,11 @@ def fmg_alive():
 def fmg_main(task, arg=None, timeout=120):
     """Execute une tache Oil sur le thread principal (Script en At Every Update) et attend le resultat."""
     if not fmg_alive():
-        raise RuntimeError("Smode ne traite plus les demandes : le Script Smode Filemanager GUI est-il toujours dans "
-                           "le projet ouvert, actif, en Launch Mode 'At Every Update' ?")
+        raise RuntimeError(fmg_t("dead"))
     box = {"task": task, "arg": arg, "result": None, "error": None, "done": threading.Event()}
     _FMG["queue"].put(box)
     if not box["done"].wait(timeout):
-        raise RuntimeError("Smode ne repond pas (Script bien en Launch Mode 'At Every Update' ?)")
+        raise RuntimeError(fmg_t("timeout"))
     if box["error"]:
         raise RuntimeError(box["error"])
     return box["result"]
@@ -473,12 +520,11 @@ def fmg_consolidate_plan(dest):
     dest = os.path.abspath(fmg_clean_path(dest)) if fmg_clean_path(dest) else ""
     error = ""
     if not dest:
-        error = "Indiquer le dossier de destination."
+        error = fmg_t("destEmpty")
     elif fmg_to_smode(os.path.join(dest, "x"), media_dirs) is None:
-        error = ("Ce dossier n'est dans aucun Media Directory. L'ajouter dans Smode (panneau Media Directories), "
-                 "attendre quelques secondes (Smode enregistre la liste en differe) puis relancer l'analyse.")
+        error = fmg_t("destNotMd")
     elif fmg_in_readonly(os.path.join(dest, "x"), media_dirs):
-        error = "Ce dossier est dans un Media Directory en lecture seule."
+        error = fmg_t("destRo")
     scan = fmg_main("scan")
     entries, used = [], {}
     for g in sorted(scan["items"], key=lambda g: g["path"].lower()):
@@ -521,7 +567,7 @@ def fmg_copy_with_progress(src, dst, job):
         with open(src, "rb") as fi, open(tmp, "wb") as fo:
             while True:
                 if job.get("cancel"):
-                    raise RuntimeError("annule")
+                    raise RuntimeError(fmg_t("cancelled"))
                 buf = fi.read(8 * 1024 * 1024)
                 if not buf:
                     break
@@ -538,7 +584,8 @@ def fmg_copy_with_progress(src, dst, job):
         raise
 
 
-def fmg_consolidate_job(dest, selected):
+def fmg_consolidate_job(dest, selected, lang="fr"):
+    _FMG["tls"].lang = lang                   # messages du thread de copie dans la langue de l'interface
     job = _FMG["job"]
     try:
         plan = fmg_consolidate_plan(dest)
@@ -549,8 +596,7 @@ def fmg_consolidate_job(dest, selected):
         job["total_bytes"] = sum(e["size"] for e in todo if not e["exists"])
         free = fmg_free_space(plan["dest"])
         if free is not None and job["total_bytes"] > free:
-            raise RuntimeError("Espace insuffisant sur le disque de destination : %s a copier, %s libres."
-                               % (fmg_fmt_size(job["total_bytes"]), fmg_fmt_size(free)))
+            raise RuntimeError(fmg_t("noSpace", fmg_fmt_size(job["total_bytes"]), fmg_fmt_size(free)))
         for i, e in enumerate(todo):
             if job.get("cancel"):
                 break
@@ -595,7 +641,7 @@ def fmg_reveal(path):
     elif os.path.isdir(path):
         subprocess.Popen(["explorer", path])
     else:
-        raise RuntimeError("introuvable : " + path)
+        raise RuntimeError(fmg_t("notFound", path))
 
 
 def fmg_open_window(url):
@@ -644,6 +690,7 @@ class FmgHandler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", 0))
             data = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            _FMG["tls"].lang = data.get("lang") if data.get("lang") in FMG_MSG else "fr"
             self._send(200, fmg_api(path, data))
         except Exception as ex:
             self._send(500, {"error": str(ex)})
@@ -660,7 +707,8 @@ class FmgHandler(BaseHTTPRequestHandler):
 
 def fmg_api(path, data):
     if path == "/api/info":
-        return {"version": FMG_VERSION, "alive": fmg_alive(),
+        _FMG["last_poll"] = time.time()
+        return {"version": FMG_VERSION, "alive": fmg_alive(), "session": _FMG["session"],
                 "mediaDirs": [{"name": n, "dir": d, "readOnly": ro} for n, d, ro in fmg_media_dirs()]}
     if path == "/api/scan":
         scan = fmg_main("scan")
@@ -676,12 +724,12 @@ def fmg_api(path, data):
     if path == "/api/consolidate/start":
         with _FMG["lock"]:
             if _FMG["job"] and _FMG["job"]["running"]:
-                raise RuntimeError("un consolidate est deja en cours")
+                raise RuntimeError(fmg_t("jobRunning"))
             _FMG["job"] = {"running": True, "total": 0, "index": 0, "total_bytes": 0, "done_bytes": 0,
                            "current": "", "results": [], "error": "", "cancel": False}
         sel = data.get("selected")
-        threading.Thread(target=fmg_consolidate_job, args=(data.get("dest", ""), set(sel) if sel is not None else None),
-                         daemon=True).start()
+        threading.Thread(target=fmg_consolidate_job, args=(data.get("dest", ""), set(sel) if sel is not None else None,
+                                                           fmg_lang()), daemon=True).start()
         return {"started": True}
     if path == "/api/consolidate/cancel":
         if _FMG["job"]:
@@ -696,7 +744,7 @@ def fmg_api(path, data):
     if path == "/api/reveal":
         fmg_reveal(fmg_clean_path(data.get("path", "")))
         return {"ok": True}
-    raise RuntimeError("endpoint inconnu : " + path)
+    raise RuntimeError(fmg_t("unknown", path))
 
 
 def fmg_start_server(p):
@@ -812,15 +860,20 @@ padding:10px 16px;opacity:0;transform:translateY(8px);transition:.25s;pointer-ev
 #toast.on{opacity:1;transform:none}#toast.bad{border-color:var(--red)}
 .spin{display:inline-block;width:14px;height:14px;border:2px solid var(--mut);border-top-color:transparent;border-radius:50%;
 animation:sp 0.8s linear infinite;vertical-align:-2px}@keyframes sp{to{transform:rotate(360deg)}}
+.lang{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.lang button{background:var(--card2);color:var(--mut);border:0;padding:6px 11px;font-weight:600;font-size:12px}
+.lang button+button{border-left:1px solid var(--line)}.lang button:hover{color:var(--fg)}
+.lang button.on{background:var(--acc);color:#fff}
 </style></head><body>
 <header>
   <div class="logo">SMODE FILEMANAGER<small>v__VERSION__</small></div>
-  <div class="proj"><span class="dot" id="dot"></span>Projet <b id="proj">...</b></div>
+  <div class="proj"><span class="dot" id="dot"></span><span data-i18n="proj">Project</span> <b id="proj">...</b></div>
   <div class="sp"></div>
-  <button class="btn" id="rescan">Rescanner le projet</button>
+  <button class="btn" id="rescan" data-i18n="rescan">Rescan</button>
+  <div class="lang" id="lang" data-i18n-title="langTitle"><button data-l="fr">FR</button><button data-l="en">EN</button></div>
 </header>
 <nav>
-  <button data-t="medias" class="on">Medias</button>
+  <button data-t="medias" class="on" data-i18n="tabMedias">Media</button>
   <button data-t="relocate">Relocate</button>
   <button data-t="consolidate">Consolidate</button>
   <button data-t="dirs">Media Directories</button>
@@ -828,155 +881,250 @@ animation:sp 0.8s linear infinite;vertical-align:-2px}@keyframes sp{to{transform
 <main>
 <section class="tab on" id="t-medias">
   <div class="tiles" id="m-tiles"></div>
-  <div class="toolbar"><button class="btn clr" id="m-clear" title="Effacer la recherche (Echap)"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2L10 10M10 2L2 10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button><input type="text" id="m-q" placeholder="Rechercher...">
-    <select id="m-scope" title="Ou chercher">
-      <option value="ns">Nom du fichier + Scene</option><option value="name">Nom du fichier</option>
-      <option value="scene">Scene</option><option value="path">Chemins (Smode + disque)</option>
-      <option value="all">Partout (y compris Compos / calques)</option></select>
+  <div class="toolbar"><button class="btn clr" id="m-clear" data-i18n-title="clearTitle"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2L10 10M10 2L2 10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button><input type="text" id="m-q" data-i18n-ph="searchPh">
+    <select id="m-scope" data-i18n-title="scopeTitle">
+      <option value="ns" data-i18n="scopeNs"></option><option value="name" data-i18n="scopeName"></option>
+      <option value="scene" data-i18n="scopeScene"></option><option value="path" data-i18n="scopePath"></option>
+      <option value="all" data-i18n="scopeAll"></option></select>
     <span class="expl" id="m-count"></span></div>
-  <div class="list" id="m-list"><div class="empty"><span class="spin"></span> Scan du projet...</div></div>
+  <div class="list" id="m-list"></div>
 </section>
 
 <section class="tab" id="t-relocate">
   <div class="box">
-    <h2>Dossiers ou chercher</h2>
-    <p class="help">Les fichiers manquants sont cherches par leur nom dans ces dossiers (sous-dossiers compris).
-      Sans dossier : tous les Media Directories modifiables. Un dossier parent large (ex. le dossier du projet) trouve plus.</p>
+    <h2 data-i18n="rH2"></h2>
+    <p class="help" data-i18n="rHelp"></p>
     <div class="chips" id="r-folders" style="margin-bottom:10px"></div>
-    <div class="row"><input type="text" id="r-add" placeholder="Coller un chemin (les guillemets sont acceptes)">
-      <button class="btn" id="r-addbtn">Ajouter</button><button class="btn" id="r-browse">Parcourir...</button></div>
+    <div class="row"><input type="text" id="r-add" data-i18n-ph="rAddPh">
+      <button class="btn" id="r-addbtn" data-i18n="add"></button><button class="btn" id="r-browse" data-i18n="browse"></button></div>
     <div class="row" style="margin-top:12px">
-      <label class="chk"><input type="checkbox" id="r-abs" checked> Autoriser les chemins absolus (fichier hors Media Directory, non portable)</label>
-      <div class="sp"></div><button class="btn pri" id="r-run">Analyser</button></div>
+      <label class="chk"><input type="checkbox" id="r-abs" checked> <span data-i18n="rAbs"></span></label>
+      <div class="sp"></div><button class="btn pri" id="r-run" data-i18n="analyse"></button></div>
   </div>
   <div id="r-out"></div>
 </section>
 
 <section class="tab" id="t-consolidate">
   <div class="box">
-    <h2>Destination</h2>
-    <p class="help">Les medias sont copies dans Destination / Scene / Type (VIDEO, IMAGE, AUDIO, 3D). Un fichier
-      utilise dans plusieurs Scenes va dans _COMMUN. Les originaux restent en place. La destination doit etre dans un Media Directory.</p>
-    <div class="row"><input type="text" id="c-dest" placeholder="Dossier de destination">
-      <select id="c-md"><option value="">Media Directories...</option></select>
-      <button class="btn" id="c-mdref" title="Relire la liste des Media Directories (apres en avoir ajoute un dans Smode)">&#8635; Media Directories</button>
-      <button class="btn" id="c-browse">Parcourir...</button><button class="btn pri" id="c-run">Analyser</button></div>
+    <h2 data-i18n="cH2"></h2>
+    <p class="help" data-i18n="cHelp"></p>
+    <div class="row"><input type="text" id="c-dest" data-i18n-ph="destPh">
+      <select id="c-md"><option value=""></option></select>
+      <button class="btn" id="c-mdref" data-i18n-title="mdRefTitle">&#8635; Media Directories</button>
+      <button class="btn" id="c-browse" data-i18n="browse"></button><button class="btn pri" id="c-run" data-i18n="analyse"></button></div>
   </div>
   <div id="c-out"></div>
 </section>
 
 <section class="tab" id="t-dirs">
   <div class="box"><h2>Media Directories</h2>
-    <p class="help">Lus dans la configuration de Smode. Pour en ajouter : panneau Media Directories de Smode, puis Rafraichir
-      (Smode enregistre la liste quelques secondes apres l'ajout).</p>
-    <div id="d-list"></div><div style="margin-top:10px"><button class="btn" id="d-refresh">Rafraichir</button></div></div>
+    <p class="help" data-i18n="dHelp"></p>
+    <div id="d-list"></div><div style="margin-top:10px"><button class="btn" id="d-refresh" data-i18n="refresh"></button></div></div>
 </section>
 </main>
 <div id="toast"></div>
 <script>
-var S={items:[],mfilter:'*',rFolders:[],reloc:null,rFilter:'*',plan:null,cFilter:'*',dirs:[],job:null};
+/* ---------------- langues ---------------- */
+var I18N={
+fr:{proj:'Projet',rescan:'Rescanner le projet',tabMedias:'M\u00e9dias',langTitle:'Langue de l\'interface',
+ clearTitle:'Effacer la recherche (\u00c9chap)',searchPh:'Rechercher...',scopeTitle:'O\u00f9 chercher',scopeNs:'Nom du fichier + Scene',
+ scopeName:'Nom du fichier',scopeScene:'Scene',scopePath:'Chemins (Smode + disque)',scopeAll:'Partout (y compris Compos / calques)',
+ scanning:'Scan du projet...',rH2:'Dossiers o\u00f9 chercher',
+ rHelp:'Les fichiers manquants sont cherch\u00e9s par leur nom dans ces dossiers (sous-dossiers compris). Sans dossier : tous les Media Directories modifiables. Un dossier parent large (ex. le dossier du projet) trouve plus.',
+ rAddPh:'Coller un chemin (les guillemets sont accept\u00e9s)',add:'Ajouter',browse:'Parcourir...',
+ rAbs:'Autoriser les chemins absolus (fichier hors Media Directory, non portable)',analyse:'Analyser',cH2:'Destination',
+ cHelp:'Les m\u00e9dias sont copi\u00e9s dans Destination / Scene / Type (VIDEO, IMAGE, AUDIO, 3D). Un fichier utilis\u00e9 dans plusieurs Scenes va dans _COMMUN. Les originaux restent en place. La destination doit \u00eatre dans un Media Directory.',
+ destPh:'Dossier de destination',mdPh:'Media Directories...',mdRefTitle:'Relire la liste des Media Directories (apr\u00e8s en avoir ajout\u00e9 un dans Smode)',
+ dHelp:'Lus dans la configuration de Smode. Pour en ajouter : panneau Media Directories de Smode, puis Rafra\u00eechir (Smode enregistre la liste quelques secondes apr\u00e8s l\'ajout).',
+ refresh:'Rafra\u00eechir',thName:'Nom',thDir:'Dossier',readOnly:'lecture seule',outsideMd:'Hors Media Directory',ddEmpty:'Aucun \u00e9l\u00e9ment',
+ all:'Tout',count:'{0} / {1} m\u00e9dia(s)',noMatch:'Aucun m\u00e9dia ne correspond \u00e0 \u00ab {0} \u00bb.',noMedia:'Aucun m\u00e9dia.',
+ kDisk:'disque',kBefore:'avant',kAfter:'apr\u00e8s',explorer:'Explorateur',copyBtn:'Copier',copied:'Copi\u00e9 : {0}',
+ use1:'utilisation',useN:'utilisations',root:'(racine)',
+ noFolder:'Aucun dossier : tous les Media Directories modifiables seront fouill\u00e9s.',remove:'Retirer',
+ searching:'Recherche des fichiers manquants...',rSummary:'{0} fichier(s) manquant(s) \u00b7 dossiers fouill\u00e9s :',
+ applySel:'Appliquer la s\u00e9lection ({0})',
+ badFolders:'Dossier(s) introuvable(s), ignor\u00e9(s) : {0}. V\u00e9rifier le chemin (faute de frappe, disque d\u00e9connect\u00e9 ?).',
+ noMissing:'Aucun fichier manquant dans le projet.',absTag:'absolu',
+ notfoundHint:'Ajouter en haut le dossier o\u00f9 ce fichier se trouve probablement (ou un dossier parent), puis Analyser.',
+ refGone:'R\u00e9f\u00e9rence introuvable dans le projet (d\u00e9j\u00e0 modifi\u00e9e ?) : relancer Analyser.',applying:'Application...',
+ relinked:'{0} fichier(s) rebranch\u00e9(s) - penser \u00e0 enregistrer le projet Smode (Ctrl+S)',analysing:'Analyse...',
+ noSpace:'Espace insuffisant sur le disque de destination : {0} \u00e0 copier, {1} libres.',
+ cSummary:'Destination {0} \u00b7 {1} fichier(s), {2} \u00e0 copier',free:'{0} libres',consolidateSel:'Consolider la s\u00e9lection',
+ notConcerned:'Non concern\u00e9s',identical:'Copie identique d\u00e9j\u00e0 pr\u00e9sente',
+ missingHint:'Lancer d\'abord un Relocate pour retrouver ce fichier.',copying:'Copie en cours',done:'Termin\u00e9',cancel:'Annuler',
+ jobDone:'Consolidate termin\u00e9 - penser \u00e0 enregistrer le projet Smode (Ctrl+S)',jobErr:'Consolidate interrompu : {0}',
+ retry:'Smode ne r\u00e9pond pas, nouvel essai...',
+ neverIndexed:'Smode ne reconna\u00eet toujours pas ce fichier : v\u00e9rifier qu\'il est lisible (format, droits), puis relancer Analyser.',
+ reloaded:'Projet recharg\u00e9 dans Smode : liste mise \u00e0 jour',mdCount:'{0} Media Directories',mdNew:' ({0} nouveau(x))',
+ mdDetected:'Nouveau Media Directory d\u00e9tect\u00e9',noResp:'Smode ne r\u00e9pond pas (serveur arr\u00eat\u00e9 ?)',
+ dotOff:'Serveur injoignable',dotOn:'Connect\u00e9 \u00e0 Smode',dotWarn:'Le Script ne tourne plus dans Smode (projet ferm\u00e9, Script supprim\u00e9 ou inactif ?)',
+ units:['o','Ko','Mo','Go','To'],
+ LAB:{ok:'OK',missing:'Manquant',absolute:'Chemin absolu',pack:'Pack Smode',found:'Retrouv\u00e9',found_abs:'Retrouv\u00e9 (absolu)',
+  outside:'Hors Media Directory',ambiguous:'Ambigu',notfound:'Introuvable',pending:'En attente Smode',applied:'Appliqu\u00e9',
+  applied_abs:'Appliqu\u00e9 (absolu)',failed:'\u00c9chec',planned:'\u00c0 copier',copied:'Copi\u00e9',reused:'D\u00e9j\u00e0 copi\u00e9',inplace:'D\u00e9j\u00e0 consolid\u00e9'},
+ EXPL:{ok:'Fichier trouv\u00e9 dans un Media Directory',missing:'Introuvable pour Smode : utiliser Relocate',
+  absolute:'Trouv\u00e9 hors de tout Media Directory (non portable)',pack:'M\u00e9dia d\'un pack Smode en lecture seule',
+  found:'Pr\u00eat \u00e0 appliquer',found_abs:'Hors Media Directory : sera rebranch\u00e9 en chemin absolu',
+  outside:'Trouv\u00e9 mais les chemins absolus sont d\u00e9sactiv\u00e9s',ambiguous:'Plusieurs candidats \u00e0 \u00e9galit\u00e9 : choisir le bon',
+  notfound:'Aucun fichier de ce nom : ajouter un dossier o\u00f9 chercher (un dossier parent large marche bien)',
+  pending:'Fichier pr\u00e9sent sur le disque, Smode ne l\'a pas encore index\u00e9 : v\u00e9rification automatique',
+  applied:'Rebranch\u00e9 et v\u00e9rifi\u00e9',applied_abs:'Rebranch\u00e9 en chemin absolu',failed:'Erreur',planned:'Sera copi\u00e9 puis rebranch\u00e9',
+  copied:'Copi\u00e9, rebranch\u00e9 et v\u00e9rifi\u00e9',reused:'Copie identique d\u00e9j\u00e0 pr\u00e9sente : rebranch\u00e9 sans recopier',inplace:'D\u00e9j\u00e0 dans la destination'}},
+en:{proj:'Project',rescan:'Rescan project',tabMedias:'Media',langTitle:'Interface language',
+ clearTitle:'Clear search (Esc)',searchPh:'Search...',scopeTitle:'Search in',scopeNs:'File name + Scene',
+ scopeName:'File name',scopeScene:'Scene',scopePath:'Paths (Smode + disk)',scopeAll:'Everywhere (including Compos / layers)',
+ scanning:'Scanning the project...',rH2:'Folders to search',
+ rHelp:'Missing files are searched by name in these folders (subfolders included). No folder: all writable Media Directories. A broad parent folder (e.g. the project folder) finds more.',
+ rAddPh:'Paste a path (quotes are accepted)',add:'Add',browse:'Browse...',
+ rAbs:'Allow absolute paths (file outside any Media Directory, not portable)',analyse:'Analyse',cH2:'Destination',
+ cHelp:'Media are copied to Destination / Scene / Type (VIDEO, IMAGE, AUDIO, 3D). A file used in several Scenes goes to _COMMUN. Originals stay in place. The destination must be inside a Media Directory.',
+ destPh:'Destination folder',mdPh:'Media Directories...',mdRefTitle:'Reload the Media Directories list (after adding one in Smode)',
+ dHelp:'Read from the Smode configuration. To add one: Media Directories panel in Smode, then Refresh (Smode saves the list a few seconds after the addition).',
+ refresh:'Refresh',thName:'Name',thDir:'Folder',readOnly:'read-only',outsideMd:'Outside Media Directories',ddEmpty:'No item',
+ all:'All',count:'{0} / {1} media',noMatch:'No media matches "{0}".',noMedia:'No media.',
+ kDisk:'disk',kBefore:'before',kAfter:'after',explorer:'Explorer',copyBtn:'Copy',copied:'Copied: {0}',
+ use1:'use',useN:'uses',root:'(root)',
+ noFolder:'No folder: all writable Media Directories will be searched.',remove:'Remove',
+ searching:'Searching for missing files...',rSummary:'{0} missing file(s) \u00b7 searched folders:',
+ applySel:'Apply selection ({0})',
+ badFolders:'Folder(s) not found, ignored: {0}. Check the path (typo, disconnected drive?).',
+ noMissing:'No missing file in the project.',absTag:'absolute',
+ notfoundHint:'Add above the folder where this file probably is (or a parent folder), then Analyse.',
+ refGone:'Reference not found in the project (already changed?): run Analyse again.',applying:'Applying...',
+ relinked:'{0} file(s) relinked - remember to save the Smode project (Ctrl+S)',analysing:'Analysing...',
+ noSpace:'Not enough space on the destination drive: {0} to copy, {1} free.',
+ cSummary:'Destination {0} \u00b7 {1} file(s), {2} to copy',free:'{0} free',consolidateSel:'Consolidate selection',
+ notConcerned:'Not concerned',identical:'Identical copy already there',
+ missingHint:'Run a Relocate first to find this file.',copying:'Copying',done:'Done',cancel:'Cancel',
+ jobDone:'Consolidate done - remember to save the Smode project (Ctrl+S)',jobErr:'Consolidate stopped: {0}',
+ retry:'Smode is not responding, retrying...',
+ neverIndexed:'Smode still does not recognise this file: check it is readable (format, permissions), then run Analyse again.',
+ reloaded:'Project reloaded in Smode: list updated',mdCount:'{0} Media Directories',mdNew:' ({0} new)',
+ mdDetected:'New Media Directory detected',noResp:'Smode is not responding (server stopped?)',
+ dotOff:'Server unreachable',dotOn:'Connected to Smode',dotWarn:'The Script no longer runs in Smode (project closed, Script removed or inactive?)',
+ units:['B','KB','MB','GB','TB'],
+ LAB:{ok:'OK',missing:'Missing',absolute:'Absolute path',pack:'Smode pack',found:'Found',found_abs:'Found (absolute)',
+  outside:'Outside Media Directories',ambiguous:'Ambiguous',notfound:'Not found',pending:'Waiting for Smode',applied:'Applied',
+  applied_abs:'Applied (absolute)',failed:'Failed',planned:'To copy',copied:'Copied',reused:'Already copied',inplace:'Already consolidated'},
+ EXPL:{ok:'File found in a Media Directory',missing:'Not found by Smode: use Relocate',
+  absolute:'Found outside any Media Directory (not portable)',pack:'Media from a read-only Smode pack',
+  found:'Ready to apply',found_abs:'Outside Media Directories: will be relinked with an absolute path',
+  outside:'Found, but absolute paths are disabled',ambiguous:'Several candidates tie: pick the right one',
+  notfound:'No file with this name: add a folder to search (a broad parent folder works well)',
+  pending:'File on disk, not indexed by Smode yet: checking automatically',
+  applied:'Relinked and verified',applied_abs:'Relinked with an absolute path',failed:'Error',planned:'Will be copied then relinked',
+  copied:'Copied, relinked and verified',reused:'Identical copy already there: relinked without copying',inplace:'Already in the destination'}}};
+function initialLang(){var l=null;try{l=localStorage.getItem('fmg_lang')}catch(e){}
+ if(l!=='fr'&&l!=='en')l=(navigator.language||'').toLowerCase().indexOf('fr')===0?'fr':'en';return l}
+var S={items:[],mfilter:'*',rFolders:[],reloc:null,rFilter:'*',plan:null,cFilter:'*',dirs:[],job:null,session:null,
+ lang:initialLang(),scanning:false,alive:undefined};
+/* t('cle', a, b...) : texte dans la langue choisie, {0} {1}... remplaces par les arguments */
+function t(k){var v=I18N[S.lang][k];if(v==null)v=I18N.fr[k];if(v==null)v=k;var a=arguments;
+ return String(v).replace(/\{(\d+)\}/g,function(m,i){return a[+i+1]!=null?a[+i+1]:''})}
+function LAB(s){return I18N[S.lang].LAB[s]||s}
+function EXPL(s){return I18N[S.lang].EXPL[s]||''}
+function applyStatic(){document.documentElement.lang=S.lang;
+ document.querySelectorAll('[data-i18n]').forEach(function(el){el.textContent=t(el.dataset.i18n)});
+ document.querySelectorAll('[data-i18n-ph]').forEach(function(el){el.placeholder=t(el.dataset.i18nPh)});
+ document.querySelectorAll('[data-i18n-title]').forEach(function(el){el.title=t(el.dataset.i18nTitle)});
+ document.querySelectorAll('#lang button').forEach(function(b){b.classList.toggle('on',b.dataset.l===S.lang)})}
+function setLang(l){if(l!=='fr'&&l!=='en')return;S.lang=l;try{localStorage.setItem('fmg_lang',l)}catch(e){}
+ applyStatic();ddRefresh($('m-scope'));renderMedias();renderFolders();renderDirs();syncMd();setDot(S.alive);
+ if(S.reloc)renderReloc();if(S.plan)renderPlan()}
+document.querySelectorAll('#lang button').forEach(function(b){b.onclick=function(){setLang(b.dataset.l)}});
+
 var COL={ok:'--ok',missing:'--red',absolute:'--amber',pack:'--grey',found:'--blue',found_abs:'--amber',outside:'--orange',
  ambiguous:'--violet',notfound:'--red',pending:'--cyan',applied:'--ok',applied_abs:'--amber',failed:'--dred',
  planned:'--blue',copied:'--ok',reused:'--teal',inplace:'--grey'};
-var LAB={ok:'OK',missing:'Manquant',absolute:'Chemin absolu',pack:'Pack Smode',found:'Retrouve',found_abs:'Retrouve (absolu)',
- outside:'Hors Media Directory',ambiguous:'Ambigu',notfound:'Introuvable',pending:'En attente Smode',applied:'Applique',
- applied_abs:'Applique (absolu)',failed:'Echec',planned:'A copier',copied:'Copie',reused:'Deja copie',inplace:'Deja consolide'};
-var EXPL={ok:'Fichier trouve dans un Media Directory',missing:'Introuvable pour Smode : utiliser Relocate',
- absolute:'Trouve hors de tout Media Directory (non portable)',pack:'Media d\'un pack Smode en lecture seule',
- found:'Pret a appliquer',found_abs:'Hors Media Directory : sera rebranche en chemin absolu',
- outside:'Trouve mais les chemins absolus sont desactives',ambiguous:'Plusieurs candidats a egalite : choisir le bon',
- notfound:'Aucun fichier de ce nom : ajouter un dossier ou chercher (un dossier parent large marche bien)',
- pending:'Fichier present sur le disque, Smode ne l\'a pas encore indexe : verification automatique',
- applied:'Rebranche et verifie',applied_abs:'Rebranche en chemin absolu',failed:'Erreur',planned:'Sera copie puis rebranche',
- copied:'Copie, rebranche et verifie',reused:'Copie identique deja presente : rebranche sans recopier',
- inplace:'Deja dans la destination'};
 function $(id){return document.getElementById(id)}
 function esc(t){return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function col(s){return 'var('+(COL[s]||'--grey')+')'}
 function base(p){p=String(p||'').replace(/\\/g,'/');return p.split('/').pop()}
-function fmt(n){if(!n)return '';var u=['o','Ko','Mo','Go','To'],i=0;while(n>=1024&&i<4){n/=1024;i++}return n.toFixed(i?1:0)+' '+u[i]}
-function toast(m,bad){var t=$('toast');t.textContent=m;t.className='on'+(bad?' bad':'');clearTimeout(t._h);t._h=setTimeout(function(){t.className=''},3500)}
-function api(path,data){return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data||{})})
+function fmt(n){if(!n)return '';var u=I18N[S.lang].units,i=0;while(n>=1024&&i<4){n/=1024;i++}return n.toFixed(i?1:0)+' '+u[i]}
+function fmt0(n){return fmt(n)||('0 '+I18N[S.lang].units[0])}
+function toast(m,bad){var e=$('toast');e.textContent=m;e.className='on'+(bad?' bad':'');clearTimeout(e._h);e._h=setTimeout(function(){e.className=''},3500)}
+function api(path,data){var d=data||{};d.lang=S.lang;
+ return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})
  .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||r.status);return j})},
- function(e){setDot(null);throw new Error('Smode ne repond pas (serveur arrete ?)')})}
+ function(e){setDot(null);throw new Error(t('noResp'))})}
 /* voyant : vert = Smode traite les demandes, orange = serveur joignable mais Script inactif, rouge = serveur injoignable */
-function setDot(alive){var d=$('dot');d.className='dot '+(alive===null?'off':alive?'on':'warn');
- d.title=alive===null?'Serveur injoignable':alive?'Connecte a Smode':'Le Script ne tourne plus dans Smode (projet ferme, Script supprime ou inactif ?)'}
-function copy(t){if(navigator.clipboard)navigator.clipboard.writeText(t);toast('Copie : '+t)}
-function tools(abs){if(!abs)return '';var a=esc(abs);return ' <button class="btn sm" data-reveal="'+a+'">Explorateur</button>'+
- ' <button class="btn sm" data-copy="'+a+'">Copier</button>'}
-function uses(u){if(!u||!u.length)return '';return '<details><summary>'+u.length+' utilisation'+(u.length>1?'s':'')+' &middot; '+esc(u[0]||'(racine)')+
- '</summary><ul>'+u.map(function(x){return '<li>'+esc(x||'(racine)')+'</li>'}).join('')+'</ul></details>'}
+function setDot(alive){S.alive=alive;if(alive===undefined)return;var d=$('dot');d.className='dot '+(alive===null?'off':alive?'on':'warn');
+ d.title=alive===null?t('dotOff'):alive?t('dotOn'):t('dotWarn')}
+function copy(x){if(navigator.clipboard)navigator.clipboard.writeText(x);toast(t('copied',x))}
+function tools(abs){if(!abs)return '';var a=esc(abs);return ' <button class="btn sm" data-reveal="'+a+'">'+t('explorer')+'</button>'+
+ ' <button class="btn sm" data-copy="'+a+'">'+t('copyBtn')+'</button>'}
+function uses(u){if(!u||!u.length)return '';return '<details><summary>'+u.length+' '+(u.length>1?t('useN'):t('use1'))+' &middot; '+esc(u[0]||t('root'))+
+ '</summary><ul>'+u.map(function(x){return '<li>'+esc(x||t('root'))+'</li>'}).join('')+'</ul></details>'}
 function tiles(el,list,order,cur,cb){var c={};list.forEach(function(e){c[e.state]=(c[e.state]||0)+1});
- var h='<button class="tile'+(cur==='*'?'':' off')+'" data-f="*" style="--c:var(--fg)"><b>'+list.length+'</b><span>Tout</span></button>';
- order.forEach(function(k){if(c[k])h+='<button class="tile'+(cur==='*'||cur===k?'':' off')+'" data-f="'+k+'" style="--c:'+col(k)+'"><b>'+c[k]+'</b><span>'+LAB[k]+'</span></button>'});
+ var h='<button class="tile'+(cur==='*'?'':' off')+'" data-f="*" style="--c:var(--fg)"><b>'+list.length+'</b><span>'+t('all')+'</span></button>';
+ order.forEach(function(k){if(c[k])h+='<button class="tile'+(cur==='*'||cur===k?'':' off')+'" data-f="'+k+'" style="--c:'+col(k)+'"><b>'+c[k]+'</b><span>'+LAB(k)+'</span></button>'});
  el.innerHTML=h;el.querySelectorAll('.tile').forEach(function(b){b.onclick=function(){cb(b.dataset.f)}})}
 document.addEventListener('click',function(ev){var b=ev.target.closest('[data-reveal],[data-copy]');if(!b)return;
  if(b.dataset.copy!=null)copy(b.dataset.copy);else api('/api/reveal',{path:b.dataset.reveal}).catch(function(e){toast(e.message,1)})});
 document.querySelectorAll('nav button').forEach(function(b){b.onclick=function(){
  document.querySelectorAll('nav button').forEach(function(x){x.classList.toggle('on',x===b)});
- document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('on',t.id==='t-'+b.dataset.t)})}});
+ document.querySelectorAll('.tab').forEach(function(x){x.classList.toggle('on',x.id==='t-'+b.dataset.t)})}});
 
 /* ---------------- MEDIAS ---------------- */
-function scan(){$('m-list').innerHTML='<div class="empty"><span class="spin"></span> Scan du projet...</div>';
- return api('/api/scan').then(function(r){S.items=r.items;$('proj').textContent=r.project;renderMedias()})
- .catch(function(e){$('m-list').innerHTML='<div class="err">'+esc(e.message)+'</div>'})}
-/* surligne q dans t (texte brut -> HTML echappe) */
-function hl(t,q){t=String(t==null?'':t);if(!q)return esc(t);var lo=t.toLowerCase(),out='',i=0,j;
- while((j=lo.indexOf(q,i))>=0){out+=esc(t.slice(i,j))+'<mark>'+esc(t.slice(j,j+q.length))+'</mark>';i=j+q.length}return out+esc(t.slice(i))}
+function scan(){S.scanning=true;renderMedias();
+ return api('/api/scan').then(function(r){S.items=r.items;S.scanning=false;$('proj').textContent=r.project;renderMedias()})
+ .catch(function(e){S.scanning=false;$('m-list').innerHTML='<div class="err">'+esc(e.message)+'</div>'})}
+/* surligne q dans x (texte brut -> HTML echappe) */
+function hl(x,q){x=String(x==null?'':x);if(!q)return esc(x);var lo=x.toLowerCase(),out='',i=0,j;
+ while((j=lo.indexOf(q,i))>=0){out+=esc(x.slice(i,j))+'<mark>'+esc(x.slice(j,j+q.length))+'</mark>';i=j+q.length}return out+esc(x.slice(i))}
 /* champs fouilles selon la portee choisie */
 function mFields(e,sc){var name=base(e.path),scenes=e.scenes.join(' ');
  if(sc==='name')return name;if(sc==='scene')return scenes;if(sc==='path')return e.path+' '+(e.abs||'');
  if(sc==='all')return name+' '+scenes+' '+e.path+' '+(e.abs||'')+' '+e.users.join(' ');return name+' '+scenes}
-function renderMedias(){var q=$('m-q').value.trim().toLowerCase(),sc=$('m-scope').value;
+function renderMedias(){if(S.scanning&&!S.items.length){$('m-list').innerHTML='<div class="empty"><span class="spin"></span> '+t('scanning')+'</div>';return}
+ var q=$('m-q').value.trim().toLowerCase(),sc=$('m-scope').value;
  var hit=S.items.filter(function(e){return !q||mFields(e,sc).toLowerCase().indexOf(q)>=0});
  tiles($('m-tiles'),hit,['missing','absolute','ok','pack'],S.mfilter,function(f){S.mfilter=f;renderMedias()});
  var l=hit.filter(function(e){return S.mfilter==='*'||e.state===S.mfilter});
- $('m-count').textContent=q?(hit.length+' / '+S.items.length+' media(s)'):'';
+ $('m-count').textContent=q?t('count',hit.length,S.items.length):'';
  var qn=(sc==='ns'||sc==='name'||sc==='all')?q:'',qs=(sc==='ns'||sc==='scene'||sc==='all')?q:'',qp=(sc==='path'||sc==='all')?q:'';
- $('m-list').innerHTML=l.length?l.map(function(e){return '<div class="it" style="--c:'+col(e.state)+'"><div class="hd"><span class="badge">'+LAB[e.state]+
+ $('m-list').innerHTML=l.length?l.map(function(e){return '<div class="it" style="--c:'+col(e.state)+'"><div class="hd"><span class="badge">'+LAB(e.state)+
   '</span><span class="type">'+e.type+'</span><span class="name">'+hl(base(e.path),qn)+'</span><span class="expl">'+hl(e.scenes.join(', '),qs)+
   '</span><span class="size">'+fmt(e.size)+'</span></div><div class="p"><span class="k">Smode</span><code>'+hl(e.path,qp)+'</code></div>'+
-  (e.abs?'<div class="p"><span class="k">disque</span><code>'+hl(e.abs,qp)+'</code>'+tools(e.abs)+'</div>':'')+uses(e.users)+'</div>'}).join('')
-  :'<div class="empty">'+(q?'Aucun media ne correspond a &laquo; '+esc(q)+' &raquo;.':'Aucun media.')+'</div>'}
+  (e.abs?'<div class="p"><span class="k">'+t('kDisk')+'</span><code>'+hl(e.abs,qp)+'</code>'+tools(e.abs)+'</div>':'')+uses(e.users)+'</div>'}).join('')
+  :'<div class="empty">'+(q?esc(t('noMatch',q)):t('noMedia'))+'</div>'}
 $('m-q').oninput=renderMedias;$('m-scope').onchange=renderMedias;
 $('m-clear').onclick=function(){$('m-q').value='';renderMedias();$('m-q').focus()};
 $('m-q').onkeydown=function(e){if(e.key==='Escape')$('m-clear').onclick()};$('rescan').onclick=function(){scan();loadInfo()};
 
 /* ---------------- RELOCATE ---------------- */
 function renderFolders(){$('r-folders').innerHTML=S.rFolders.length?S.rFolders.map(function(f,i){return '<span class="chip">'+esc(f)+
- '<button data-i="'+i+'" title="Retirer">&times;</button></span>'}).join(''):'<span class="expl">Aucun dossier : tous les Media Directories modifiables seront fouilles.</span>';
+ '<button data-i="'+i+'" title="'+esc(t('remove'))+'">&times;</button></span>'}).join(''):'<span class="expl">'+t('noFolder')+'</span>';
  $('r-folders').querySelectorAll('button').forEach(function(b){b.onclick=function(){S.rFolders.splice(+b.dataset.i,1);renderFolders()}})}
 function addFolder(p){p=String(p||'').trim().replace(/^["']|["']$/g,'');if(p&&S.rFolders.indexOf(p)<0)S.rFolders.push(p);renderFolders()}
 $('r-addbtn').onclick=function(){addFolder($('r-add').value);$('r-add').value=''};
 $('r-add').onkeydown=function(e){if(e.key==='Enter')$('r-addbtn').onclick()};
 $('r-browse').onclick=function(){api('/api/browse',{initial:S.rFolders[0]||''}).then(function(r){if(r.path)addFolder(r.path)})
  .catch(function(e){toast(e.message,1)})};
-$('r-run').onclick=function(){$('r-out').innerHTML='<div class="empty"><span class="spin"></span> Recherche des fichiers manquants...</div>';
+$('r-run').onclick=function(){$('r-out').innerHTML='<div class="empty"><span class="spin"></span> '+t('searching')+'</div>';
  api('/api/relocate/analyze',{folders:S.rFolders,allowAbsolute:$('r-abs').checked}).then(function(r){
   r.entries.forEach(function(e){e.sel=(e.state==='found'||e.state==='found_abs');e.pick=-1});S.reloc=r;S.rFilter='*';renderReloc();
   var pend=r.entries.filter(function(e){return e.state==='pending'}).map(function(e){return e.old});if(pend.length)watchPending(pend,'reloc')})
  .catch(function(e){$('r-out').innerHTML='<div class="err">'+esc(e.message)+'</div>'})};
 function renderReloc(){var r=S.reloc;if(!r)return;var order=['failed','notfound','ambiguous','outside','found_abs','found','pending','applied_abs','applied'];
  var n=r.entries.filter(function(e){return e.sel&&(e.new||e.pick>=0)}).length;
- var h='<div class="tiles" id="r-tiles"></div><div class="toolbar"><span class="expl">'+r.entries.length+' fichier(s) manquant(s) &middot; dossiers fouilles : '+
-  r.folders.map(esc).join(' ; ')+'</span><div class="sp"></div><button class="btn pri" id="r-apply"'+(n?'':' disabled')+'>Appliquer la selection ('+n+')</button></div>';
- if(r.badFolders&&r.badFolders.length)h='<div class="err">Dossier(s) introuvable(s), ignore(s) : '+r.badFolders.map(esc).join(' ; ')+
-  '. Verifier le chemin (faute de frappe, disque deconnecte ?).</div>'+h;
- if(!r.entries.length)h+='<div class="empty">Aucun fichier manquant dans le projet.</div>';
+ var h='<div class="tiles" id="r-tiles"></div><div class="toolbar"><span class="expl">'+esc(t('rSummary',r.entries.length))+' '+
+  r.folders.map(esc).join(' ; ')+'</span><div class="sp"></div><button class="btn pri" id="r-apply"'+(n?'':' disabled')+'>'+esc(t('applySel',n))+'</button></div>';
+ if(r.badFolders&&r.badFolders.length)h='<div class="err">'+esc(t('badFolders',r.badFolders.join(' ; ')))+'</div>'+h;
+ if(!r.entries.length)h+='<div class="empty">'+t('noMissing')+'</div>';
  h+='<div class="list">';
  r.entries.forEach(function(e,i){if(S.rFilter!=='*'&&e.state!==S.rFilter)return;
   var canSel=(e.state==='found'||e.state==='found_abs'||(e.state==='ambiguous'&&e.pick>=0));
   h+='<div class="it" style="--c:'+col(e.state)+'"><div class="hd">'+
    ((e.state==='found'||e.state==='found_abs'||e.state==='ambiguous')?'<input type="checkbox" data-sel="'+i+'"'+(e.sel&&canSel?' checked':'')+(canSel?'':' disabled')+'>':'')+
-   '<span class="badge">'+LAB[e.state]+'</span><span class="type">'+e.type+'</span><span class="name">'+esc(base(e.old))+'</span><span class="expl">'+EXPL[e.state]+'</span></div>'+
-   '<div class="p old"><span class="k">avant</span><code>'+esc(e.old)+'</code></div>'+
-   (e.new&&e.state!=='pending'?'<div class="p new"><span class="k">apres</span><code>'+esc(e.new)+'</code>'+tools(e.abs)+'</div>':'')+
-   (e.state==='pending'?'<div class="p"><span class="k">disque</span><code>'+esc(e.abs)+'</code>'+tools(e.abs)+'</div>':'');
+   '<span class="badge">'+LAB(e.state)+'</span><span class="type">'+e.type+'</span><span class="name">'+esc(base(e.old))+'</span><span class="expl">'+EXPL(e.state)+'</span></div>'+
+   '<div class="p old"><span class="k">'+t('kBefore')+'</span><code>'+esc(e.old)+'</code></div>'+
+   (e.new&&e.state!=='pending'?'<div class="p new"><span class="k">'+t('kAfter')+'</span><code>'+esc(e.new)+'</code>'+tools(e.abs)+'</div>':'')+
+   (e.state==='pending'?'<div class="p"><span class="k">'+t('kDisk')+'</span><code>'+esc(e.abs)+'</code>'+tools(e.abs)+'</div>':'');
   if(e.cands)e.cands.forEach(function(c,j){h+='<label class="cand"><input type="radio" name="pk'+i+'" data-pick="'+i+'" value="'+j+'"'+(e.pick===j?' checked':'')+
-   '><code>'+esc(c.abs)+'</code>'+(c.absolute?'<span class="type">absolu</span>':'')+tools(c.abs)+'</label>'});
-  if(e.state==='notfound')h+='<div class="hint">Ajouter en haut le dossier ou ce fichier se trouve probablement (ou un dossier parent), puis Analyser.</div>';
-  if(e.err)h+='<div class="hint">'+esc(e.err)+'</div>';
+   '><code>'+esc(c.abs)+'</code>'+(c.absolute?'<span class="type">'+t('absTag')+'</span>':'')+tools(c.abs)+'</label>'});
+  if(e.state==='notfound')h+='<div class="hint">'+t('notfoundHint')+'</div>';
+  if(e.err)h+='<div class="hint">'+esc(t(e.err))+'</div>';
   h+=uses(e.users)+'</div>'});
  $('r-out').innerHTML=h+'</div>';
  tiles($('r-tiles'),r.entries,order,S.rFilter,function(f){S.rFilter=f;renderReloc()});
@@ -986,13 +1134,13 @@ function renderReloc(){var r=S.reloc;if(!r)return;var order=['failed','notfound'
 function applyReloc(){var r=S.reloc,ch=[],map={};
  r.entries.forEach(function(e){if(!e.sel)return;var nw=e.state==='ambiguous'?(e.pick>=0?e.cands[e.pick].new:null):e.new;
   if(nw&&(e.state==='found'||e.state==='found_abs'||e.state==='ambiguous')){ch.push({old:e.old,new:nw});map[e.old]=e}});
- if(!ch.length)return;$('r-apply').disabled=true;$('r-apply').innerHTML='<span class="spin"></span> Application...';
+ if(!ch.length)return;$('r-apply').disabled=true;$('r-apply').innerHTML='<span class="spin"></span> '+t('applying');
  api('/api/relocate/apply',{changes:ch}).then(function(res){var pend=[];
   Object.keys(res.results).forEach(function(old){var e=map[old],s=res.results[old];var abs=e.state==='found_abs'||(e.state==='ambiguous'&&e.cands[e.pick].absolute);
    if(e.state==='ambiguous'){e.abs=e.cands[e.pick].abs;e.new=e.cands[e.pick].new;e.cands=null}
    e.isAbs=abs;e.sel=false;e.state=s==='ok'?(abs?'applied_abs':'applied'):s==='pending'?'pending':'failed';
-   if(s==='failed')e.err='Reference introuvable dans le projet (deja modifiee ?) : relancer Analyser.';if(s==='pending')pend.push(e.new)});
-  renderReloc();toast(ch.length+' fichier(s) rebranche(s) - penser a enregistrer le projet Smode (Ctrl+S)');scan();
+   if(s==='failed')e.err='refGone';if(s==='pending')pend.push(e.new)});
+  renderReloc();toast(t('relinked',ch.length));scan();
   if(pend.length)watchPending(pend,'reloc')})
  .catch(function(e){toast(e.message,1);renderReloc()})}
 
@@ -1003,25 +1151,25 @@ function syncMd(){syncMd0();ddRefresh($('c-md'))}
 function syncMd0(){var d=normP($('c-dest').value),sel=$('c-md'),best=null;
  S.dirs.forEach(function(m){if(m.readOnly)return;var r=normP(m.dir);if((d===r||d.indexOf(r+'\\')===0)&&(!best||r.length>normP(best.dir).length))best=m});
  var x=sel.querySelector('option[data-sub]');if(x)x.remove();
- sel.options[0].textContent='Media Directories...';sel.dataset.warn='';
+ sel.options[0].textContent=t('mdPh');sel.dataset.warn='';
  if(!d){sel.value='';return}
  if(best&&normP(best.dir)===d){sel.value=best.dir}
  else if(best){var o=document.createElement('option');o.dataset.sub='1';o.value='__sub';
-  o.textContent=best.name+' › '+$('c-dest').value.trim().replace(/^["']|["']$/g,'').slice(best.dir.length).replace(/^[\\\/]+/,'');
+  o.textContent=best.name+' \u203a '+$('c-dest').value.trim().replace(/^["']|["']$/g,'').slice(best.dir.length).replace(/^[\\\/]+/,'');
   sel.appendChild(o);sel.value='__sub'}
- else{sel.value='';sel.options[0].textContent='Hors Media Directory';sel.dataset.warn='1'}}
+ else{sel.value='';sel.options[0].textContent=t('outsideMd');sel.dataset.warn='1'}}
 $('c-md').onchange=function(){if(this.value&&this.value!=='__sub')$('c-dest').value=this.value;syncMd()};
 $('c-dest').oninput=syncMd;
 function mdRefresh(silent){var before=S.dirs.length;return loadInfo().then(function(){
- if(!silent)toast(S.dirs.length+' Media Directories'+(S.dirs.length>before?' ('+(S.dirs.length-before)+' nouveau'+(S.dirs.length-before>1?'x':'')+')':''));
+ if(!silent)toast(t('mdCount',S.dirs.length)+(S.dirs.length>before?t('mdNew',S.dirs.length-before):''));
  if(S.plan&&S.plan.error&&$('c-dest').value)$('c-run').onclick()})}
 $('c-mdref').onclick=function(){mdRefresh(false)};
 /* destination hors Media Directory : on relit la liste toutes les 3 s (Smode l'enregistre en differe) */
 setInterval(function(){if(S.plan&&S.plan.error&&$('c-dest').value&&!(S.job&&S.job.running)){var n=S.dirs.length;
- loadInfo().then(function(){if(S.dirs.length!==n){toast('Nouveau Media Directory detecte');$('c-run').onclick()}})}},3000);
+ loadInfo().then(function(){if(S.dirs.length!==n){toast(t('mdDetected'));$('c-run').onclick()}})}},3000);
 $('c-browse').onclick=function(){api('/api/browse',{initial:$('c-dest').value}).then(function(r){if(r.path){$('c-dest').value=r.path;syncMd()}})
  .catch(function(e){toast(e.message,1)})};
-$('c-run').onclick=function(){$('c-out').innerHTML='<div class="empty"><span class="spin"></span> Analyse...</div>';
+$('c-run').onclick=function(){$('c-out').innerHTML='<div class="empty"><span class="spin"></span> '+t('analysing')+'</div>';
  api('/api/consolidate/plan',{dest:$('c-dest').value}).then(function(r){r.entries.forEach(function(e){e.sel=e.state==='planned'});S.plan=r;S.cFilter='*';renderPlan()})
  .catch(function(e){$('c-out').innerHTML='<div class="err">'+esc(e.message)+'</div>'})};
 function renderPlan(){var r=S.plan;if(!r)return;var order=['failed','missing','pending','planned','copied','reused','inplace','pack'];
@@ -1029,48 +1177,48 @@ function renderPlan(){var r=S.plan;if(!r)return;var order=['failed','missing','p
  var bytes=sel.reduce(function(a,e){return a+(e.exists?0:(e.size||0))},0);
  var full=r.free!=null&&bytes>r.free;
  var h=r.error?'<div class="err">'+esc(r.error)+'</div>':'';
- if(full&&!r.error)h+='<div class="err">Espace insuffisant sur le disque de destination : '+fmt(bytes)+' a copier, '+(fmt(r.free)||'0 o')+' libres.</div>';
- h+='<div class="tiles" id="c-tiles"></div><div class="toolbar"><span class="expl">Destination <code>'+esc(r.dest||'-')+'</code> &middot; '+sel.length+
-  ' fichier(s), '+(fmt(bytes)||'0 o')+' a copier'+(r.free!=null?' &middot; '+(fmt(r.free)||'0 o')+' libres':'')+'</span><div class="sp"></div>'+
-  '<button class="btn pri" id="c-go"'+(sel.length&&!r.error&&!full?'':' disabled')+'>Consolider la selection</button></div>';
+ if(full&&!r.error)h+='<div class="err">'+esc(t('noSpace',fmt0(bytes),fmt0(r.free)))+'</div>';
+ h+='<div class="tiles" id="c-tiles"></div><div class="toolbar"><span class="expl">'+
+  esc(t('cSummary','\u0001',sel.length,fmt0(bytes))).replace('\u0001','<code>'+esc(r.dest||'-')+'</code>')+
+  (r.free!=null?' &middot; '+esc(t('free',fmt0(r.free))):'')+'</span><div class="sp"></div>'+
+  '<button class="btn pri" id="c-go"'+(sel.length&&!r.error&&!full?'':' disabled')+'>'+t('consolidateSel')+'</button></div>';
  h+='<div id="c-prog"></div>';
  var groups={},rest=[];r.entries.forEach(function(e,i){e._i=i;if(S.cFilter!=='*'&&e.state!==S.cFilter)return;if(e.group)(groups[e.group]=groups[e.group]||[]).push(e);else rest.push(e)});
  Object.keys(groups).sort().forEach(function(g){h+='<div class="grp">'+esc(g)+'</div><div class="list">'+groups[g].map(planItem).join('')+'</div>'});
- if(rest.length)h+='<div class="grp">Non concernes</div><div class="list">'+rest.map(planItem).join('')+'</div>';
+ if(rest.length)h+='<div class="grp">'+t('notConcerned')+'</div><div class="list">'+rest.map(planItem).join('')+'</div>';
  $('c-out').innerHTML=h;tiles($('c-tiles'),r.entries,order,S.cFilter,function(f){S.cFilter=f;renderPlan()});
  $('c-out').querySelectorAll('[data-csel]').forEach(function(c){c.onchange=function(){r.entries[+c.dataset.csel].sel=c.checked;renderPlan()}});
  var go=$('c-go');if(go)go.onclick=startJob;if(S.job&&S.job.running)renderJob()}
 function planItem(e){return '<div class="it" style="--c:'+col(e.state)+'"><div class="hd">'+(e.state==='planned'?'<input type="checkbox" data-csel="'+e._i+'"'+(e.sel?' checked':'')+'>':'')+
- '<span class="badge">'+LAB[e.state]+'</span><span class="type">'+e.type+'</span><span class="name">'+esc(base(e.old))+'</span><span class="expl">'+
- (e.state==='planned'&&e.exists?'Copie identique deja presente':EXPL[e.state])+(e.err?' : '+esc(e.err):'')+'</span><span class="size">'+fmt(e.size)+'</span></div>'+
- '<div class="p old"><span class="k">avant</span><code>'+esc(e.old)+'</code>'+tools(e.src)+'</div>'+
- (e.new?'<div class="p new"><span class="k">apres</span><code>'+esc(e.new)+'</code>'+((e.state==='copied'||e.state==='reused'||e.state==='pending')?tools(e.target):'')+'</div>':'')+
- (e.state==='missing'?'<div class="hint">Lancer d\'abord un Relocate pour retrouver ce fichier.</div>':'')+uses(e.users)+'</div>'}
+ '<span class="badge">'+LAB(e.state)+'</span><span class="type">'+e.type+'</span><span class="name">'+esc(base(e.old))+'</span><span class="expl">'+
+ (e.state==='planned'&&e.exists?t('identical'):EXPL(e.state))+(e.err?' : '+esc(t(e.err)):'')+'</span><span class="size">'+fmt(e.size)+'</span></div>'+
+ '<div class="p old"><span class="k">'+t('kBefore')+'</span><code>'+esc(e.old)+'</code>'+tools(e.src)+'</div>'+
+ (e.new?'<div class="p new"><span class="k">'+t('kAfter')+'</span><code>'+esc(e.new)+'</code>'+((e.state==='copied'||e.state==='reused'||e.state==='pending')?tools(e.target):'')+'</div>':'')+
+ (e.state==='missing'?'<div class="hint">'+t('missingHint')+'</div>':'')+uses(e.users)+'</div>'}
 function startJob(){var r=S.plan;var sel=r.entries.filter(function(e){return e.sel&&e.state==='planned'}).map(function(e){return e.old});
  api('/api/consolidate/start',{dest:r.dest,selected:sel}).then(function(){S.job={running:true};renderPlan();pollJob()}).catch(function(e){toast(e.message,1)})}
 function renderJob(){var j=S.job,el=$('c-prog');if(!el||!j)return;var pc=j.total_bytes?Math.round(100*j.done_bytes/j.total_bytes):(j.total?Math.round(100*(j.index||0)/j.total):0);
- el.innerHTML='<div class="box"><div class="row"><b>'+(j.running?'Copie en cours':'Termine')+'</b><span class="expl">'+(j.index||0)+' / '+(j.total||0)+' &middot; '+
-  fmt(j.done_bytes)+' / '+fmt(j.total_bytes)+'</span><span class="mono expl">'+esc(j.current||'')+'</span><div class="sp"></div>'+
-  (j.running?'<button class="btn sm" id="c-cancel">Annuler</button>':'')+'</div><div class="prog" style="margin-top:10px"><i style="width:'+pc+'%"></i></div>'+
+ el.innerHTML='<div class="box"><div class="row"><b>'+(j.running?t('copying'):t('done'))+'</b><span class="expl">'+(j.index||0)+' / '+(j.total||0)+' &middot; '+
+  fmt0(j.done_bytes)+' / '+fmt0(j.total_bytes)+'</span><span class="mono expl">'+esc(j.current||'')+'</span><div class="sp"></div>'+
+  (j.running?'<button class="btn sm" id="c-cancel">'+t('cancel')+'</button>':'')+'</div><div class="prog" style="margin-top:10px"><i style="width:'+pc+'%"></i></div>'+
   (j.error?'<div class="err" style="margin:10px 0 0">'+esc(j.error)+'</div>':'')+'</div>';
  var c=$('c-cancel');if(c)c.onclick=function(){api('/api/consolidate/cancel')}}
 function pollJob(){fetch('/api/job',{method:'POST'}).then(function(r){return r.json()}).then(function(j){S.job=j;
  var byOld={};(j.results||[]).forEach(function(x){byOld[x.old]=x});
- S.plan.entries.forEach(function(e){var x=byOld[e.old];if(x){e.state=x.state;e.err=x.error;e.sel=false}});
+ if(S.plan)S.plan.entries.forEach(function(e){var x=byOld[e.old];if(x){e.state=x.state;e.err=x.error;e.sel=false}});
  if(j.running){renderJob();var el=$('c-prog');if(!el)renderPlan();setTimeout(pollJob,500)}
  else{renderPlan();renderJob();scan();var pend=(j.results||[]).filter(function(x){return x.state==='pending'}).map(function(x){return x.new});
-  toast(j.error?'Consolidate interrompu : '+j.error:'Consolidate termine - penser a enregistrer le projet Smode (Ctrl+S)',!!j.error);
+  toast(j.error?t('jobErr',j.error):t('jobDone'),!!j.error);
   if(pend.length)watchPending(pend,'plan')}},
- function(){toast('Smode ne repond pas, nouvel essai...',1);setTimeout(pollJob,2000)})}
+ function(){toast(t('retry'),1);setTimeout(pollJob,2000)})}
 
 /* ---------------- verification des fichiers en attente ---------------- */
-/* revérifie toutes les 2 s (40 s max) ; un seul rescan du projet a la fin (un scan gele Smode quelques
+/* reverifie toutes les 2 s (40 s max) ; un seul rescan du projet a la fin (un scan gele Smode quelques
    secondes sur un gros projet) ; au-dela, les fichiers jamais reconnus passent en Echec avec une explication */
 function watchPending(paths,where,n){n=n||0;var list=where==='reloc'?(S.reloc&&S.reloc.entries):(S.plan&&S.plan.entries);
  function redraw(){where==='reloc'?renderReloc():renderPlan()}
  if(!paths.length){scan();return}
- if(n>=20){(list||[]).forEach(function(e){if(e.state==='pending'&&paths.indexOf(e.new)>=0){e.state='failed';
-   e.err='Smode ne reconnait toujours pas ce fichier : verifier qu\'il est lisible (format, droits), puis relancer Analyser.'}});
+ if(n>=20){(list||[]).forEach(function(e){if(e.state==='pending'&&paths.indexOf(e.new)>=0){e.state='failed';e.err='neverIndexed'}});
   redraw();scan();return}
  setTimeout(function(){api('/api/check',{paths:paths}).then(function(res){
   var left=paths.filter(function(p){return res[p]!=='ok'});
@@ -1079,15 +1227,19 @@ function watchPending(paths,where,n){n=n||0;var list=where==='reloc'?(S.reloc&&S
   watchPending(left,where,n+1)},function(){watchPending(paths,where,n+1)})},2000)}
 
 /* ---------------- MEDIA DIRECTORIES ---------------- */
-function loadInfo(){return api('/api/info').then(function(r){S.dirs=r.mediaDirs;setDot(!!r.alive);
- $('d-list').innerHTML='<table><tr><th>Nom</th><th>Dossier</th><th></th></tr>'+r.mediaDirs.map(function(d){return '<tr><td><b>'+esc(d.name)+'</b>'+
-  (d.readOnly?' <span class="type">lecture seule</span>':'')+'</td><td class="mono">'+esc(d.dir)+'</td><td>'+tools(d.dir)+'</td></tr>'}).join('')+'</table>';
- $('c-md').innerHTML='<option value="">Media Directories...</option>'+r.mediaDirs.filter(function(d){return !d.readOnly}).map(function(d){
+/* le Script a redemarre dans Smode (projet rouvert...) : on repart de zero sur le projet actuel */
+function checkSession(s){if(s==null)return;if(S.session==null){S.session=s;return}if(s===S.session)return;S.session=s;
+ S.reloc=null;S.plan=null;S.job=null;$('r-out').innerHTML='';$('c-out').innerHTML='';
+ toast(t('reloaded'));scan();loadInfo()}
+function renderDirs(){$('d-list').innerHTML='<table><tr><th>'+t('thName')+'</th><th>'+t('thDir')+'</th><th></th></tr>'+S.dirs.map(function(d){return '<tr><td><b>'+esc(d.name)+'</b>'+
+  (d.readOnly?' <span class="type">'+t('readOnly')+'</span>':'')+'</td><td class="mono">'+esc(d.dir)+'</td><td>'+tools(d.dir)+'</td></tr>'}).join('')+'</table>'}
+function loadInfo(){return api('/api/info').then(function(r){S.dirs=r.mediaDirs;setDot(!!r.alive);checkSession(r.session);renderDirs();
+ $('c-md').innerHTML='<option value=""></option>'+r.mediaDirs.filter(function(d){return !d.readOnly}).map(function(d){
   return '<option value="'+esc(d.dir)+'">'+esc(d.name)+'</option>'}).join('');syncMd()})}
 $('d-refresh').onclick=loadInfo;
 /* ---------------- listes deroulantes maison (la surbrillance d'un <select> natif est imposee par Windows) ---------------- */
 function ddRefresh(sel){var w=sel._dd;if(!w)return;var o=sel.options[sel.selectedIndex];w.lab.textContent=o?o.textContent:'';
- w.btn.classList.toggle('warn',sel.dataset.warn==='1')}
+ w.btn.classList.toggle('warn',sel.dataset.warn==='1');w.btn.title=sel.title||''}
 function makeDD(sel){var w=document.createElement('div');w.className='dd';sel.parentNode.insertBefore(w,sel);w.appendChild(sel);sel.style.display='none';
  var btn=document.createElement('button');btn.type='button';btn.className='dd-btn';btn.title=sel.title||'';
  btn.innerHTML='<span class="dd-lab"></span><svg width="10" height="6" viewBox="0 0 10 6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -1100,7 +1252,7 @@ function makeDD(sel){var w=document.createElement('div');w.className='dd';sel.pa
  function open(){opts=[];list.innerHTML='';Array.prototype.forEach.call(sel.options,function(op){if(op.value===''||op.value==='__sub')return;
    var el=document.createElement('div');el.className='dd-opt'+(op.value===sel.value?' sel':'');el.textContent=op.textContent;var i=opts.length;
    el.onmousedown=function(e){e.preventDefault();pick(i)};el.onmouseenter=function(){act=i;mark()};list.appendChild(el);opts.push({v:op.value,el:el})});
-  if(!opts.length)list.innerHTML='<div class="dd-empty">Aucun element</div>';
+  if(!opts.length)list.innerHTML='<div class="dd-empty">'+t('ddEmpty')+'</div>';
   act=Math.max(0,opts.map(function(o){return o.v}).indexOf(sel.value));w.classList.add('open');mark()}
  btn.onclick=function(){w.classList.contains('open')?close():open()};
  btn.onblur=function(){setTimeout(close,120)};
@@ -1110,33 +1262,45 @@ function makeDD(sel){var w=document.createElement('div');w.className='dd';sel.pa
   else if(e.key==='Enter'||e.key===' '){e.preventDefault();if(isOpen)pick(act);else open()}
   else if(e.key==='Escape'&&isOpen){e.preventDefault();close()}};
  ddRefresh(sel)}
+applyStatic();
 makeDD($('m-scope'));makeDD($('c-md'));
 renderFolders();loadInfo();scan();
-setInterval(function(){fetch('/api/info',{method:'POST'}).then(function(r){return r.json()}).then(function(j){setDot(!!j.alive)},
+setInterval(function(){fetch('/api/info',{method:'POST'}).then(function(r){return r.json()}).then(function(j){setDot(!!j.alive);checkSession(j.session)},
  function(){setDot(null)})},5000);
 </script></body></html>"""
 
 
 # ===================================== BOUCLE (chaque frame) =====================================
 _fmg_port = int(script.port.get())
+_fmg_now = time.time()
 for _t in ("SERVEUR", "ETAT"):
     if str(getattr(script, _t)) != "-" * 40:
         setattr(script, _t, "-" * 40)
-# (Re)demarrage seulement au premier passage, si la version ou le port change, ou sur Restart Server.
+# Le Script (re)demarre : premier passage de la session Smode, ou il ne tournait plus depuis quelques secondes
+# (projet ferme puis rouvert, Script ajoute au projet, Script repasse en At Every Update). Le serveur et _FMG,
+# eux, survivent a la fermeture du projet : on ne peut donc pas se fier au seul demarrage du serveur.
+_fmg_resumed = _FMG["version"] is None or _fmg_now - _FMG["tick"] > 3
+if _fmg_resumed:
+    _FMG["session"] += 1
+    _FMG["refs"] = {}                      # references Oil de l'ancien projet : ne plus jamais s'en servir
+    if _FMG["job"] and _FMG["job"].get("running"):
+        _FMG["job"]["cancel"] = True
+# (Re)demarrage du serveur seulement au premier passage, si la version ou le port change, ou sur Restart Server.
 # Un echec (port deja pris) n'est PAS retente a chaque frame : changer le port ou cocher Restart Server.
 _fmg_restart = bool(script.restartServer.get())
 if _FMG["version"] != FMG_VERSION or _FMG["port"] != _fmg_port or _fmg_restart:
     if _fmg_restart:
         script.restartServer.set(False)
-    _first = _FMG["version"] is None
-    _url = fmg_start_server(_fmg_port)
-    script.status = _url
-    if _url.startswith("http") and (script.openInterface.get() or (_first and script.autoOpen.get())):
-        fmg_open_window(_url)
-        script.openInterface.set(False)
+    script.status = fmg_start_server(_fmg_port)
+_fmg_url = "http://127.0.0.1:%d" % _fmg_port
 if script.openInterface.get():
     script.openInterface.set(False)
     if _FMG["servers"]:
-        fmg_open_window("http://127.0.0.1:%d" % _fmg_port)
+        fmg_open_window(_fmg_url)
+elif _fmg_resumed and script.autoOpen.get() and _FMG["servers"]:
+    # Une fenetre ouverte interroge le serveur toutes les 5 s (au moins 1 fois/min si elle est reduite) :
+    # dans ce cas pas de 2e fenetre, celle qui est ouverte recharge le projet toute seule (session).
+    if _fmg_now - _FMG["last_poll"] > 70:
+        fmg_open_window(_fmg_url)
 _FMG["tick"] = time.time()
 fmg_process_queue()
