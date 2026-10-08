@@ -15,6 +15,8 @@ Smode has no relink function and no structured consolidate. This repository adds
   relinks the project to the copies. Originals stay in place, an identical copy already present is reused, name
   collisions get a ` (2)` suffix, Smode's read-only packs are skipped.
 
+<p align="center"><a href="docs/gui-medias.png"><img src="docs/gui-medias.png" width="760" alt="Smode Filemanager GUI - Medias tab"></a></p>
+
 Two versions of the same tool:
 
 | File | Interface |
@@ -25,39 +27,64 @@ Two versions of the same tool:
 ## Smode_Filemanager_GUI.py
 
 The Script embeds a small web server on `127.0.0.1:8893` (this machine only) and opens the interface in an
-application window (Microsoft Edge `--app` mode, no address bar).
+application window (Microsoft Edge `--app` mode, no address bar). Smode keeps running while you work in it: the disk
+search and the file copies happen in the background.
 
-- **Medias** tab: every file of the project with its state (OK, missing, absolute path, Smode pack), filters,
-  search, Scenes, size, "Explorer" and "Copy" buttons.
-- **Relocate** tab: search folders (Windows folder picker or pasted path, quotes accepted), Analyse, tick what to
-  apply, **pick the right candidate for ambiguous files**, apply the selection.
-- **Consolidate** tab: destination (folder picker or your Media Directories; the list shows which Media Directory
-  contains the destination), plan grouped by Scene / type with the total size, **copy in the background with a
-  progress bar** (Smode does not freeze), cancel button.
-- **Media Directories** tab: the list read from Smode.
+The dot next to the project name shows the link with Smode: **green** = connected, **orange** = the Script no longer
+runs (project closed, Script removed or not in *At Every Update*), **red** = server unreachable.
 
-Files freshly copied are indexed by Smode with a delay: they show as *waiting for Smode* and are re-checked
-automatically until they resolve.
+### Medias
+
+Every file of the project with its state (OK, missing, absolute path, Smode pack), counter tiles that filter the
+list, a search box with a scope (file name + Scene, file name, Scene, paths, everywhere), the Scenes that use the
+file, its size, and "Explorer" / "Copy" buttons.
+
+### Relocate
+
+Add the folders to search (Windows folder picker or a pasted path, quotes accepted), click **Analyser**, tick what
+to apply, **pick the right candidate for ambiguous files**, then apply the selection. Files Smode has not indexed
+yet are re-checked automatically.
+
+| 1. Missing files, not in the Media Directories | 2. After adding the folder where they now are | 3. Applied |
+|:---:|:---:|:---:|
+| <a href="docs/gui-relocate-1-introuvables.png"><img src="docs/gui-relocate-1-introuvables.png" width="280"></a> | <a href="docs/gui-relocate-2-retrouves.png"><img src="docs/gui-relocate-2-retrouves.png" width="280"></a> | <a href="docs/gui-relocate-3-appliques.png"><img src="docs/gui-relocate-3-appliques.png" width="280"></a> |
+
+### Consolidate
+
+Choose the destination (folder picker or the list of your Media Directories, which shows the one containing the
+destination), click **Analyser**: the plan is grouped by Scene / type, with the total to copy and the free space on
+the destination drive. **Consolider la selection** copies in the background with a progress bar and a cancel button;
+a cancelled or failed copy leaves no partial file behind.
+
+| 1. Plan (Scene / type, size, free space) | 2. Copy in progress | 3. Done, project relinked to the copies |
+|:---:|:---:|:---:|
+| <a href="docs/gui-consolidate-1-plan.png"><img src="docs/gui-consolidate-1-plan.png" width="280"></a> | <a href="docs/gui-consolidate-2-copie.png"><img src="docs/gui-consolidate-2-copie.png" width="280"></a> | <a href="docs/gui-consolidate-3-termine.png"><img src="docs/gui-consolidate-3-termine.png" width="280"></a> |
 
 ### Install
 
 1. Drag `Smode_Filemanager_GUI.py` into your Smode project (Script) and set **Launch Mode = At Every Update**.
 2. The window opens by itself (option **Auto Open**); otherwise tick **Open Interface**.
-3. Everything else happens in the window. Change the port in the Script panel if 8893 is taken.
+3. Everything else happens in the window. If port 8893 is taken, the error shows in **Status**: change **Port**.
 
 The destination of a Consolidate **must be inside a Media Directory**: add it in Smode first, then use the
 "↻ Media Directories" button (Smode saves the list a few seconds after you add one; the window also re-reads it
 automatically while the destination is refused).
 
+Relocate and Consolidate change the project in memory: **save the Smode project** (Ctrl+S) afterwards.
+
 ## Smode_Filemanager.py
 
 Same Relocate and Consolidate, driven from the Script parameters (sections GENERAL / RELOCATE / CONSOLIDATE /
 RAPPORT): pick a **Mode**, fill **Search Folders** or **Consolidate Folder**, Execute to get the HTML report, then tick
-**Apply Changes** and Execute again. Launch Mode = Manual. After a Consolidate, run Execute once or twice more until
-everything is *already consolidated*.
+**Apply Changes** and Execute again. Launch Mode = Manual. Copies are done during the Execute (Smode waits). After a
+Consolidate, run Execute once or twice more until everything is *already consolidated*.
 
 ## Limits
 
+- Missing files are matched **by file name**: if the real file is gone and another file with the same name exists
+  elsewhere, it will be proposed. Check the list before applying (untick what is wrong).
+- Scanning the project goes through Smode: on a large project, Smode pauses for a few seconds at each scan. Avoid
+  running it during a show.
 - Files referenced *inside* a 3D file (external FBX textures) and image sequences are not handled.
 - Windows only (Edge, Explorer and PowerShell folder picker for the GUI).
 
