@@ -15,7 +15,7 @@ Smode has no relink function and no structured consolidate. This repository adds
   relinks the project to the copies. Originals stay in place, an identical copy already present is reused, name
   collisions get a ` (2)` suffix, Smode's read-only packs are skipped.
 
-<p align="center"><a href="docs/gui-medias.png"><img src="docs/gui-medias.png" width="760" alt="Smode Filemanager GUI - Medias tab"></a></p>
+<p align="center"><a href="docs/gui-media.png"><img src="docs/gui-media.png" width="760" alt="Smode Filemanager GUI - Medias tab"></a></p>
 
 Two versions of the same tool:
 
@@ -48,14 +48,13 @@ Add the folders to search (Windows folder picker or a pasted path, quotes accept
 to apply, **pick the right candidate for ambiguous files**, then apply the selection. Files Smode has not indexed
 yet are re-checked automatically.
 
-| 1. Missing files, not in the Media Directories | 2. After adding the folder where they now are | 3. Applied |
+| 1. Analysis: ambiguous files, pick the right candidate | 2. All found, ready to apply | 3. Applied |
 |:---:|:---:|:---:|
-| <a href="docs/gui-relocate-1-introuvables.png"><img src="docs/gui-relocate-1-introuvables.png" width="280"></a> | <a href="docs/gui-relocate-2-retrouves.png"><img src="docs/gui-relocate-2-retrouves.png" width="280"></a> | <a href="docs/gui-relocate-3-appliques.png"><img src="docs/gui-relocate-3-appliques.png" width="280"></a> |
+| <a href="docs/gui-relocate-1-analysis.png"><img src="docs/gui-relocate-1-analysis.png" width="280"></a> | <a href="docs/gui-relocate-2-found.png"><img src="docs/gui-relocate-2-found.png" width="280"></a> | <a href="docs/gui-relocate-3-applied.png"><img src="docs/gui-relocate-3-applied.png" width="280"></a> |
 
 When several files share the name and none of them is closer to the old path, the file is marked **ambiguous**:
-pick the right candidate (the "Explorer" button helps to check), and only then can it be applied.
+pick the right candidate (the "Explorer" button helps to check), and only then can it be applied (step 1 above).
 
-<p align="center"><a href="docs/gui-relocate-ambigu.png"><img src="docs/gui-relocate-ambigu.png" width="620" alt="Relocate - ambiguous files, choosing the right candidate"></a></p>
 
 ### Consolidate
 
@@ -66,7 +65,7 @@ a cancelled or failed copy leaves no partial file behind.
 
 | 1. Plan (Scene / type, size, free space) | 2. Copy in progress | 3. Done, project relinked to the copies |
 |:---:|:---:|:---:|
-| <a href="docs/gui-consolidate-1-plan.png"><img src="docs/gui-consolidate-1-plan.png" width="280"></a> | <a href="docs/gui-consolidate-2-copie.png"><img src="docs/gui-consolidate-2-copie.png" width="280"></a> | <a href="docs/gui-consolidate-3-termine.png"><img src="docs/gui-consolidate-3-termine.png" width="280"></a> |
+| <a href="docs/gui-consolidate-1-plan.png"><img src="docs/gui-consolidate-1-plan.png" width="280"></a> | <a href="docs/gui-consolidate-2-copying.png"><img src="docs/gui-consolidate-2-copying.png" width="280"></a> | <a href="docs/gui-consolidate-3-done.png"><img src="docs/gui-consolidate-3-done.png" width="280"></a> |
 
 ### Install
 

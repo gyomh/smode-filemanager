@@ -16,7 +16,7 @@ Smode n'a ni fonction de relink ni consolidate structuré. Ce dépôt ajoute les
   présente est réutilisée, deux fichiers différents de même nom reçoivent un suffixe ` (2)`, les packs Smode en
   lecture seule sont ignorés.
 
-<p align="center"><a href="docs/gui-medias.png"><img src="docs/gui-medias.png" width="760" alt="Smode Filemanager GUI - onglet Medias"></a></p>
+<p align="center"><a href="docs/gui-media.png"><img src="docs/gui-media.png" width="760" alt="Smode Filemanager GUI - onglet Medias"></a></p>
 
 Deux versions du même outil :
 
@@ -49,14 +49,13 @@ Ajouter les dossiers où chercher (sélecteur de dossier Windows ou chemin coll�
 **Analyser**, cocher ce qu'on applique, **choisir le bon candidat pour les fichiers ambigus**, puis appliquer la
 sélection. Les fichiers que Smode n'a pas encore indexés sont revérifiés automatiquement.
 
-| 1. Fichiers manquants, absents des Media Directories | 2. Après ajout du dossier où ils se trouvent maintenant | 3. Appliqué |
+| 1. Analyse : fichiers ambigus, choisir le bon candidat | 2. Tous retrouvés, prêts à appliquer | 3. Appliqué |
 |:---:|:---:|:---:|
-| <a href="docs/gui-relocate-1-introuvables.png"><img src="docs/gui-relocate-1-introuvables.png" width="280"></a> | <a href="docs/gui-relocate-2-retrouves.png"><img src="docs/gui-relocate-2-retrouves.png" width="280"></a> | <a href="docs/gui-relocate-3-appliques.png"><img src="docs/gui-relocate-3-appliques.png" width="280"></a> |
+| <a href="docs/gui-relocate-1-analysis.png"><img src="docs/gui-relocate-1-analysis.png" width="280"></a> | <a href="docs/gui-relocate-2-found.png"><img src="docs/gui-relocate-2-found.png" width="280"></a> | <a href="docs/gui-relocate-3-applied.png"><img src="docs/gui-relocate-3-applied.png" width="280"></a> |
 
 Quand plusieurs fichiers portent le même nom et qu'aucun n'est plus proche de l'ancien chemin, le fichier est marqué
-**ambigu** : choisir le bon candidat (le bouton « Explorateur » aide à vérifier) ; il ne peut être appliqué qu'ensuite.
+**ambigu** : choisir le bon candidat (le bouton « Explorateur » aide à vérifier) ; il ne peut être appliqué qu'ensuite (étape 1 ci-dessus).
 
-<p align="center"><a href="docs/gui-relocate-ambigu.png"><img src="docs/gui-relocate-ambigu.png" width="620" alt="Relocate - fichiers ambigus, choix du bon candidat"></a></p>
 
 ### Consolidate
 
@@ -67,7 +66,7 @@ bouton Annuler ; une copie annulée ou en erreur ne laisse aucun fichier partiel
 
 | 1. Plan (Scene / type, taille, espace libre) | 2. Copie en cours | 3. Terminé, projet rebranché sur les copies |
 |:---:|:---:|:---:|
-| <a href="docs/gui-consolidate-1-plan.png"><img src="docs/gui-consolidate-1-plan.png" width="280"></a> | <a href="docs/gui-consolidate-2-copie.png"><img src="docs/gui-consolidate-2-copie.png" width="280"></a> | <a href="docs/gui-consolidate-3-termine.png"><img src="docs/gui-consolidate-3-termine.png" width="280"></a> |
+| <a href="docs/gui-consolidate-1-plan.png"><img src="docs/gui-consolidate-1-plan.png" width="280"></a> | <a href="docs/gui-consolidate-2-copying.png"><img src="docs/gui-consolidate-2-copying.png" width="280"></a> | <a href="docs/gui-consolidate-3-done.png"><img src="docs/gui-consolidate-3-done.png" width="280"></a> |
 
 ### Installation
 
