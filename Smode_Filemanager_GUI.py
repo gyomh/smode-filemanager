@@ -10,7 +10,7 @@
 # __________________________________________ ___________________________________________
 # |                                       | |                                         |
 # |    SMODE FILEMANAGER GUI              | | Interface graphique du Filemanager,     |
-# |       V0.3                            | | servie par Smode (serveur HTTP local)   |
+# |       V0.8                            | | servie par Smode (serveur HTTP local)   |
 # |                                       | | dans une fenetre d'application.         |
 # |_______________________________________| |_________________________________________|
 # |    Instructions :                     | | - Medias : liste, etats, filtres        |
@@ -30,6 +30,13 @@
 #                      (analyse relancee des qu'un nouveau dossier apparait).
 # V0.3 - 08/10/2026 - Consolidate : la liste affiche le Media Directory qui contient la destination
 #                      ("Nom > sous-dossier" si sous-dossier, "Hors Media Directory" en orange sinon).
+# V0.4 - 08/10/2026 - Medias : recherche avec portee (Nom + Scene par defaut, Nom, Scene, Chemins,
+#                      Partout), compteur de resultats, tuiles recalculees sur la recherche, surlignage.
+# V0.5 - 08/10/2026 - Medias : bouton croix a gauche du champ pour effacer la recherche (ou Echap).
+# V0.6 - 08/10/2026 - Bouton d'effacement : croix dessinee en SVG centree, survol bleu comme les autres boutons.
+# V0.7 - 08/10/2026 - Listes deroulantes : contour bleu au survol / focus ; cases et boutons radio bleus.
+# V0.8 - 08/10/2026 - Listes deroulantes dessinees par l'interface (surbrillance bleue de l'app au lieu de
+#                      celle de Windows), clavier fleches / Entree / Echap, "Hors Media Directory" en orange.
 #
 
 # =============== OPTIONS (visibles/modifiables dans le panneau du Script) ===============
@@ -52,7 +59,7 @@ import subprocess
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-FMG_VERSION = "0.3"
+FMG_VERSION = "0.8"
 FMG_SKIP_CLASSES = ('String', 'SrgbColor', 'Boolean', 'PositiveReal', 'Real', 'Percentage',
                     'UnboundedPercentage', 'Integer', 'Matrix4d')
 FMG_TYPE_FOLDERS = {"VideoFileContent": "VIDEO", "Color2dMipmaps": "IMAGE", "AudioFileContent": "AUDIO",
@@ -644,7 +651,21 @@ main{flex:1;overflow:auto;padding:20px}
 input[type=text]{flex:1;min-width:260px;background:var(--code);color:var(--fg);border:1px solid var(--line);
 border-radius:7px;padding:8px 10px;font:13px Consolas,monospace}
 input[type=text]:focus{outline:none;border-color:var(--acc)}
-select{background:var(--code);color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:7px}
+select{background:var(--code);color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:7px;cursor:pointer}
+select:hover,select:focus{outline:none;border-color:var(--acc)}
+.dd{position:relative;display:inline-block}
+.dd-btn{display:inline-flex;align-items:center;justify-content:space-between;gap:12px;min-width:220px;background:var(--code);
+color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:7px 11px;text-align:left}
+.dd-btn:hover,.dd-btn:focus,.dd.open .dd-btn{outline:none;border-color:var(--acc)}
+.dd-btn svg{color:var(--mut);flex:none;transition:transform .15s}.dd.open .dd-btn svg{transform:rotate(180deg)}
+.dd-btn.warn{color:var(--orange)}
+.dd-list{display:none;position:absolute;z-index:50;top:calc(100% + 4px);left:0;min-width:100%;max-height:320px;overflow:auto;
+background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:4px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.dd.open .dd-list{display:block}
+.dd-opt{padding:7px 11px;border-radius:5px;cursor:pointer;white-space:nowrap}.dd-opt.sel{font-weight:600}
+.dd-opt.act{background:var(--acc);color:#fff}.dd-empty{padding:7px 11px;color:var(--mut)}
+.btn:focus-visible{outline:none;border-color:var(--acc)}
+input[type=checkbox],input[type=radio]{accent-color:var(--acc)}
 label.chk{display:inline-flex;gap:7px;align-items:center;color:var(--fg);cursor:pointer;user-select:none}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
 .chip{display:inline-flex;align-items:center;gap:6px;background:var(--code);border:1px solid var(--line);
@@ -678,6 +699,9 @@ background:color-mix(in srgb,var(--c) 10%,transparent)}
 .prog{height:10px;background:var(--code);border-radius:999px;overflow:hidden;border:1px solid var(--line)}
 .prog i{display:block;height:100%;width:0;background:var(--acc);transition:width .3s}
 .mono{font:12px Consolas,monospace}
+.btn.clr{width:34px;height:34px;padding:0;display:inline-flex;align-items:center;justify-content:center;color:var(--mut)}
+.btn.clr:hover{color:var(--fg)}.btn.clr svg{display:block}
+mark{background:color-mix(in srgb,var(--amber) 45%,transparent);color:inherit;border-radius:2px;padding:0 1px}
 table{width:100%;border-collapse:collapse}td,th{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left}
 th{color:var(--mut);font-weight:600;font-size:12px}
 #toast{position:fixed;right:18px;bottom:18px;background:var(--card2);border:1px solid var(--line);border-radius:8px;
@@ -701,7 +725,12 @@ animation:sp 0.8s linear infinite;vertical-align:-2px}@keyframes sp{to{transform
 <main>
 <section class="tab on" id="t-medias">
   <div class="tiles" id="m-tiles"></div>
-  <div class="toolbar"><input type="text" id="m-q" placeholder="Filtrer par nom, chemin, Scene..."></div>
+  <div class="toolbar"><button class="btn clr" id="m-clear" title="Effacer la recherche (Echap)"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2L10 10M10 2L2 10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button><input type="text" id="m-q" placeholder="Rechercher...">
+    <select id="m-scope" title="Ou chercher">
+      <option value="ns">Nom du fichier + Scene</option><option value="name">Nom du fichier</option>
+      <option value="scene">Scene</option><option value="path">Chemins (Smode + disque)</option>
+      <option value="all">Partout (y compris Compos / calques)</option></select>
+    <span class="expl" id="m-count"></span></div>
   <div class="list" id="m-list"><div class="empty"><span class="spin"></span> Scan du projet...</div></div>
 </section>
 
@@ -786,15 +815,27 @@ document.querySelectorAll('nav button').forEach(function(b){b.onclick=function()
 function scan(){$('m-list').innerHTML='<div class="empty"><span class="spin"></span> Scan du projet...</div>';
  return api('/api/scan').then(function(r){S.items=r.items;$('proj').textContent=r.project;renderMedias()})
  .catch(function(e){$('m-list').innerHTML='<div class="err">'+esc(e.message)+'</div>'})}
-function renderMedias(){var q=$('m-q').value.toLowerCase();
- tiles($('m-tiles'),S.items,['missing','absolute','ok','pack'],S.mfilter,function(f){S.mfilter=f;renderMedias()});
- var l=S.items.filter(function(e){return (S.mfilter==='*'||e.state===S.mfilter)&&(!q||(e.path+' '+(e.abs||'')+' '+e.scenes.join(' ')).toLowerCase().indexOf(q)>=0)});
+/* surligne q dans t (texte brut -> HTML echappe) */
+function hl(t,q){t=String(t==null?'':t);if(!q)return esc(t);var lo=t.toLowerCase(),out='',i=0,j;
+ while((j=lo.indexOf(q,i))>=0){out+=esc(t.slice(i,j))+'<mark>'+esc(t.slice(j,j+q.length))+'</mark>';i=j+q.length}return out+esc(t.slice(i))}
+/* champs fouilles selon la portee choisie */
+function mFields(e,sc){var name=base(e.path),scenes=e.scenes.join(' ');
+ if(sc==='name')return name;if(sc==='scene')return scenes;if(sc==='path')return e.path+' '+(e.abs||'');
+ if(sc==='all')return name+' '+scenes+' '+e.path+' '+(e.abs||'')+' '+e.users.join(' ');return name+' '+scenes}
+function renderMedias(){var q=$('m-q').value.trim().toLowerCase(),sc=$('m-scope').value;
+ var hit=S.items.filter(function(e){return !q||mFields(e,sc).toLowerCase().indexOf(q)>=0});
+ tiles($('m-tiles'),hit,['missing','absolute','ok','pack'],S.mfilter,function(f){S.mfilter=f;renderMedias()});
+ var l=hit.filter(function(e){return S.mfilter==='*'||e.state===S.mfilter});
+ $('m-count').textContent=q?(hit.length+' / '+S.items.length+' media(s)'):'';
+ var qn=(sc==='ns'||sc==='name'||sc==='all')?q:'',qs=(sc==='ns'||sc==='scene'||sc==='all')?q:'',qp=(sc==='path'||sc==='all')?q:'';
  $('m-list').innerHTML=l.length?l.map(function(e){return '<div class="it" style="--c:'+col(e.state)+'"><div class="hd"><span class="badge">'+LAB[e.state]+
-  '</span><span class="type">'+e.type+'</span><span class="name">'+esc(base(e.path))+'</span><span class="expl">'+esc(e.scenes.join(', '))+
-  '</span><span class="size">'+fmt(e.size)+'</span></div><div class="p"><span class="k">Smode</span><code>'+esc(e.path)+'</code></div>'+
-  (e.abs?'<div class="p"><span class="k">disque</span><code>'+esc(e.abs)+'</code>'+tools(e.abs)+'</div>':'')+uses(e.users)+'</div>'}).join('')
-  :'<div class="empty">Aucun media.</div>'}
-$('m-q').oninput=renderMedias;$('rescan').onclick=function(){scan();loadInfo()};
+  '</span><span class="type">'+e.type+'</span><span class="name">'+hl(base(e.path),qn)+'</span><span class="expl">'+hl(e.scenes.join(', '),qs)+
+  '</span><span class="size">'+fmt(e.size)+'</span></div><div class="p"><span class="k">Smode</span><code>'+hl(e.path,qp)+'</code></div>'+
+  (e.abs?'<div class="p"><span class="k">disque</span><code>'+hl(e.abs,qp)+'</code>'+tools(e.abs)+'</div>':'')+uses(e.users)+'</div>'}).join('')
+  :'<div class="empty">'+(q?'Aucun media ne correspond a &laquo; '+esc(q)+' &raquo;.':'Aucun media.')+'</div>'}
+$('m-q').oninput=renderMedias;$('m-scope').onchange=renderMedias;
+$('m-clear').onclick=function(){$('m-q').value='';renderMedias();$('m-q').focus()};
+$('m-q').onkeydown=function(e){if(e.key==='Escape')$('m-clear').onclick()};$('rescan').onclick=function(){scan();loadInfo()};
 
 /* ---------------- RELOCATE ---------------- */
 function renderFolders(){$('r-folders').innerHTML=S.rFolders.length?S.rFolders.map(function(f,i){return '<span class="chip">'+esc(f)+
@@ -847,16 +888,17 @@ function applyReloc(){var r=S.reloc,ch=[],map={};
 /* ---------------- CONSOLIDATE ---------------- */
 function normP(p){return String(p||'').trim().replace(/^["']|["']$/g,'').replace(/\//g,'\\').replace(/\\+$/,'').toLowerCase()}
 /* la liste affiche le Media Directory qui contient la destination (ou "hors Media Directory") */
-function syncMd(){var d=normP($('c-dest').value),sel=$('c-md'),best=null;
+function syncMd(){syncMd0();ddRefresh($('c-md'))}
+function syncMd0(){var d=normP($('c-dest').value),sel=$('c-md'),best=null;
  S.dirs.forEach(function(m){if(m.readOnly)return;var r=normP(m.dir);if((d===r||d.indexOf(r+'\\')===0)&&(!best||r.length>normP(best.dir).length))best=m});
  var x=sel.querySelector('option[data-sub]');if(x)x.remove();
- if(!d){sel.value='';sel.style.color='';return}
- if(best&&normP(best.dir)===d){sel.value=best.dir;sel.style.color=''}
+ sel.options[0].textContent='Media Directories...';sel.dataset.warn='';
+ if(!d){sel.value='';return}
+ if(best&&normP(best.dir)===d){sel.value=best.dir}
  else if(best){var o=document.createElement('option');o.dataset.sub='1';o.value='__sub';
   o.textContent=best.name+' › '+$('c-dest').value.trim().replace(/^["']|["']$/g,'').slice(best.dir.length).replace(/^[\\\/]+/,'');
-  sel.appendChild(o);sel.value='__sub';sel.style.color=''}
- else{sel.value='';sel.options[0].textContent='Hors Media Directory';sel.style.color='var(--orange)';return}
- sel.options[0].textContent='Media Directories...'}
+  sel.appendChild(o);sel.value='__sub'}
+ else{sel.value='';sel.options[0].textContent='Hors Media Directory';sel.dataset.warn='1'}}
 $('c-md').onchange=function(){if(this.value&&this.value!=='__sub')$('c-dest').value=this.value;syncMd()};
 $('c-dest').oninput=syncMd;
 function mdRefresh(silent){var before=S.dirs.length;return loadInfo().then(function(){
@@ -919,6 +961,31 @@ function loadInfo(){return api('/api/info').then(function(r){S.dirs=r.mediaDirs;
  $('c-md').innerHTML='<option value="">Media Directories...</option>'+r.mediaDirs.filter(function(d){return !d.readOnly}).map(function(d){
   return '<option value="'+esc(d.dir)+'">'+esc(d.name)+'</option>'}).join('');syncMd()})}
 $('d-refresh').onclick=loadInfo;
+/* ---------------- listes deroulantes maison (la surbrillance d'un <select> natif est imposee par Windows) ---------------- */
+function ddRefresh(sel){var w=sel._dd;if(!w)return;var o=sel.options[sel.selectedIndex];w.lab.textContent=o?o.textContent:'';
+ w.btn.classList.toggle('warn',sel.dataset.warn==='1')}
+function makeDD(sel){var w=document.createElement('div');w.className='dd';sel.parentNode.insertBefore(w,sel);w.appendChild(sel);sel.style.display='none';
+ var btn=document.createElement('button');btn.type='button';btn.className='dd-btn';btn.title=sel.title||'';
+ btn.innerHTML='<span class="dd-lab"></span><svg width="10" height="6" viewBox="0 0 10 6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+ var list=document.createElement('div');list.className='dd-list';w.appendChild(btn);w.appendChild(list);
+ sel._dd={btn:btn,lab:btn.firstChild};var act=-1,opts=[];
+ function close(){w.classList.remove('open')}
+ function mark(){opts.forEach(function(o,i){o.el.classList.toggle('act',i===act)});if(opts[act])opts[act].el.scrollIntoView({block:'nearest'})}
+ function pick(i){var o=opts[i];if(!o)return;sel.value=o.v;close();ddRefresh(sel);sel.dispatchEvent(new Event('change'));btn.focus()}
+ function open(){opts=[];list.innerHTML='';Array.prototype.forEach.call(sel.options,function(op){if(op.value===''||op.value==='__sub')return;
+   var el=document.createElement('div');el.className='dd-opt'+(op.value===sel.value?' sel':'');el.textContent=op.textContent;var i=opts.length;
+   el.onmousedown=function(e){e.preventDefault();pick(i)};el.onmouseenter=function(){act=i;mark()};list.appendChild(el);opts.push({v:op.value,el:el})});
+  if(!opts.length)list.innerHTML='<div class="dd-empty">Aucun element</div>';
+  act=Math.max(0,opts.map(function(o){return o.v}).indexOf(sel.value));w.classList.add('open');mark()}
+ btn.onclick=function(){w.classList.contains('open')?close():open()};
+ btn.onblur=function(){setTimeout(close,120)};
+ btn.onkeydown=function(e){var isOpen=w.classList.contains('open');
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();if(!isOpen){open();return}
+   act=Math.min(opts.length-1,Math.max(0,act+(e.key==='ArrowDown'?1:-1)));mark()}
+  else if(e.key==='Enter'||e.key===' '){e.preventDefault();if(isOpen)pick(act);else open()}
+  else if(e.key==='Escape'&&isOpen){e.preventDefault();close()}};
+ ddRefresh(sel)}
+makeDD($('m-scope'));makeDD($('c-md'));
 renderFolders();loadInfo();scan();
 setInterval(function(){fetch('/api/info',{method:'POST'}).then(function(){$('dot').className='dot on'},function(){$('dot').className='dot off'})},5000);
 </script></body></html>"""
