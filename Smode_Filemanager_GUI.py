@@ -10,7 +10,7 @@
 # __________________________________________ ___________________________________________
 # |                                       | |                                         |
 # |    SMODE FILEMANAGER GUI              | | Interface graphique du Filemanager,     |
-# |       V0.8                            | | servie par Smode (serveur HTTP local)   |
+# |       V0.9                            | | servie par Smode (serveur HTTP local)   |
 # |                                       | | dans une fenetre d'application.         |
 # |_______________________________________| |_________________________________________|
 # |    Instructions :                     | | - Medias : liste, etats, filtres        |
@@ -37,6 +37,23 @@
 # V0.7 - 08/10/2026 - Listes deroulantes : contour bleu au survol / focus ; cases et boutons radio bleus.
 # V0.8 - 08/10/2026 - Listes deroulantes dessinees par l'interface (surbrillance bleue de l'app au lieu de
 #                      celle de Windows), clavier fleches / Entree / Echap, "Hors Media Directory" en orange.
+# V0.9 - 08/10/2026 - Relecture du code, corrections :
+#                      - dossiers de recherche imbriques : un meme fichier n'est plus compte deux fois
+#                        (faux "Ambigu" avec deux chemins identiques) ;
+#                      - Media Directory a la racine d'un lecteur (ex. G:\) reconnu ;
+#                      - port deja pris : plus de tentative de demarrage a chaque frame ;
+#                      - copie annulee / en erreur : le fichier partiel .fmgpart est supprime ; espace disque
+#                        verifie avant la copie (et affiche dans le plan) ;
+#                      - API en POST uniquement (une page web ne peut plus declencher Explorateur / dialogue /
+#                        scan par un simple lien), 404 pour les chemins inconnus ;
+#                      - voyant orange quand le Script ne tourne plus, erreur immediate au lieu d'attendre 2 min ;
+#                      - Relocate : dossiers introuvables signales ; candidats en chemin absolu ecartes si les
+#                        chemins absolus sont desactives ;
+#                      - fichiers "En attente Smode" jamais reconnus : passes en Echec apres 40 s ; un seul
+#                        rescan du projet a la fin au lieu d'un par fichier ;
+#                      - erreurs reseau gerees (suivi de copie, Parcourir) ; rappel d'enregistrer le projet ;
+#                      - survol bleu partout (croix des dossiers, Annuler, tuiles, onglets) ;
+#                      - Scene nommee CON, NUL, AUX, COM1... : dossier prefixe par _ (nom reserve Windows).
 #
 
 # =============== OPTIONS (visibles/modifiables dans le panneau du Script) ===============
@@ -52,6 +69,7 @@ import os
 import re
 import glob
 import json
+import time
 import queue
 import shutil
 import threading
@@ -59,7 +77,7 @@ import subprocess
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-FMG_VERSION = "0.8"
+FMG_VERSION = "0.9"
 FMG_SKIP_CLASSES = ('String', 'SrgbColor', 'Boolean', 'PositiveReal', 'Real', 'Percentage',
                     'UnboundedPercentage', 'Integer', 'Matrix4d')
 FMG_TYPE_FOLDERS = {"VideoFileContent": "VIDEO", "Color2dMipmaps": "IMAGE", "AudioFileContent": "AUDIO",
@@ -76,6 +94,8 @@ FMG_NO_SCENE = "_PROJET"
 if "_FMG" not in globals():
     _FMG = {"queue": queue.Queue(), "servers": [], "version": None, "port": None,
             "refs": {}, "job": None, "lock": threading.Lock()}
+_FMG.setdefault("tick", time.time())     # cles ajoutees en V0.9 (un _FMG d'une version precedente peut etre en memoire)
+_FMG.setdefault("busy", False)
 
 
 # ===================================== CHEMINS / DISQUE (sans Oil) =====================================
@@ -100,11 +120,16 @@ def fmg_media_dirs():
     return out
 
 
+def fmg_root(d):
+    """Dossier normalise pour comparer des chemins, sans separateur final (gere la racine d'un lecteur, ex. G:\\)."""
+    return os.path.normcase(os.path.abspath(d)).rstrip(os.sep)
+
+
 def fmg_to_smode(abs_path, media_dirs):
     p = os.path.normcase(os.path.abspath(abs_path))
     best = None
     for name, d, _ in media_dirs:
-        root = os.path.normcase(os.path.abspath(d))
+        root = fmg_root(d)
         if p.startswith(root + os.sep) and (best is None or len(root) > len(best[1])):
             best = (name, root)
     if best is None:
@@ -124,16 +149,28 @@ def fmg_from_smode(path, media_dirs):
 
 def fmg_in_readonly(abs_path, media_dirs):
     p = os.path.normcase(os.path.abspath(abs_path))
-    return any(ro and p.startswith(os.path.normcase(os.path.abspath(d)) + os.sep) for _, d, ro in media_dirs)
+    return any(ro and p.startswith(fmg_root(d) + os.sep) for _, d, ro in media_dirs)
 
 
 def fmg_build_index(folders):
-    index = {}
-    for root_dir in folders:
+    """nom de fichier (minuscule) -> [chemins]. Un dossier contenu dans un autre de la liste n'est parcouru qu'une
+    fois, et un meme fichier n'est jamais compte deux fois (sinon faux cas "ambigu" avec deux chemins identiques)."""
+    roots = []                                    # (cle normalisee, dossier tel que saisi : on garde sa casse)
+    for f in sorted(folders, key=lambda x: len(fmg_root(x))):
+        k = fmg_root(f)
+        if not any(k == rk or k.startswith(rk + os.sep) for rk, _ in roots):
+            roots.append((k, f))
+    index, seen = {}, set()
+    for _, root_dir in roots:
         for dirpath, _, filenames in os.walk(root_dir):
             for f in filenames:
-                if not f.lower().endswith(".meta"):
-                    index.setdefault(f.lower(), []).append(os.path.join(dirpath, f))
+                if f.lower().endswith(".meta"):
+                    continue
+                full = os.path.join(dirpath, f)
+                key = os.path.normcase(os.path.abspath(full))
+                if key not in seen:
+                    seen.add(key)
+                    index.setdefault(f.lower(), []).append(full)
     return index
 
 
@@ -173,6 +210,8 @@ def fmg_type_folder(cls, path):
 
 def fmg_safe_name(name):
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip().rstrip(".")
+    if re.match(r"^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$", name, re.I):   # noms reserves par Windows
+        name = "_" + name
     return name or "_SANS_NOM"
 
 
@@ -188,6 +227,28 @@ def fmg_size(p):
         return os.path.getsize(p)
     except OSError:
         return 0
+
+
+def fmg_fmt_size(n):
+    for unit in ("o", "Ko", "Mo", "Go"):
+        if n < 1024:
+            return "%.0f %s" % (n, unit) if unit == "o" else "%.1f %s" % (n, unit)
+        n /= 1024.0
+    return "%.1f To" % n
+
+
+def fmg_free_space(path):
+    """Espace libre sur le disque de path (le dossier peut ne pas encore exister : on remonte au parent existant)."""
+    p = os.path.abspath(path)
+    while not os.path.exists(p):
+        parent = os.path.dirname(p)
+        if parent == p:
+            return None
+        p = parent
+    try:
+        return shutil.disk_usage(p).free
+    except OSError:
+        return None
 
 
 # ===================================== TACHES OIL (thread principal) =====================================
@@ -316,8 +377,16 @@ def fmg_task_check(paths):
 FMG_TASKS = {"scan": fmg_task_scan, "set_paths": fmg_task_set_paths, "check": fmg_task_check}
 
 
+def fmg_alive():
+    """Vrai si le Script tourne encore (frame recente, ou tache Oil en cours sur le thread principal)."""
+    return _FMG["busy"] or time.time() - _FMG["tick"] < 5
+
+
 def fmg_main(task, arg=None, timeout=120):
     """Execute une tache Oil sur le thread principal (Script en At Every Update) et attend le resultat."""
+    if not fmg_alive():
+        raise RuntimeError("Smode ne traite plus les demandes : le Script Smode Filemanager GUI est-il toujours dans "
+                           "le projet ouvert, actif, en Launch Mode 'At Every Update' ?")
     box = {"task": task, "arg": arg, "result": None, "error": None, "done": threading.Event()}
     _FMG["queue"].put(box)
     if not box["done"].wait(timeout):
@@ -330,10 +399,14 @@ def fmg_main(task, arg=None, timeout=120):
 def fmg_process_queue():
     while not _FMG["queue"].empty():
         box = _FMG["queue"].get_nowait()
+        _FMG["busy"] = True
         try:
             box["result"] = FMG_TASKS[box["task"]](box["arg"])
         except Exception as e:
             box["error"] = repr(e)
+        finally:
+            _FMG["busy"] = False
+            _FMG["tick"] = time.time()
         box["done"].set()
 
 
@@ -359,6 +432,7 @@ def fmg_items_view(scan, media_dirs):
 def fmg_relocate_analyze(folders, allow_absolute):
     media_dirs = fmg_media_dirs()
     folders = [fmg_clean_path(f) for f in folders if fmg_clean_path(f)]
+    bad = [f for f in folders if not os.path.isdir(f)]            # saisis par l'utilisateur mais introuvables
     if not folders:
         folders = [d for _, d, ro in media_dirs if not ro]
     folders = [f for f in folders if os.path.isdir(f)]
@@ -379,12 +453,19 @@ def fmg_relocate_analyze(folders, allow_absolute):
             else:
                 e.update(state="found" if new else "found_abs", new=new or cand, abs=cand)
         elif kind == "ambiguous":
-            e.update(state="ambiguous", cands=[{"abs": c, "new": fmg_to_smode(c, media_dirs) or c,
-                                                "absolute": fmg_to_smode(c, media_dirs) is None} for c in cand])
+            # chemins absolus desactives : on ecarte les candidats hors Media Directory
+            ok = [c for c in cand if allow_absolute or fmg_to_smode(c, media_dirs) is not None]
+            if not ok:
+                e.update(state="outside", abs=cand[0], new=cand[0])
+            elif len(ok) == 1:
+                e.update(state="found", new=fmg_to_smode(ok[0], media_dirs), abs=ok[0])
+            else:
+                e.update(state="ambiguous", cands=[{"abs": c, "new": fmg_to_smode(c, media_dirs) or c,
+                                                    "absolute": fmg_to_smode(c, media_dirs) is None} for c in ok])
         else:
             e["state"] = "notfound"
         entries.append(e)
-    return {"project": scan["project"], "folders": folders, "entries": entries}
+    return {"project": scan["project"], "folders": folders, "badFolders": bad, "entries": entries}
 
 
 def fmg_consolidate_plan(dest):
@@ -412,7 +493,7 @@ def fmg_consolidate_plan(dest):
         if fmg_in_readonly(src, media_dirs):
             e["state"] = "pack"
             continue
-        if dest and os.path.normcase(src).startswith(os.path.normcase(dest) + os.sep):
+        if dest and os.path.normcase(src).startswith(fmg_root(dest) + os.sep):
             e["state"] = "inplace"
             continue
         scene_dir = FMG_SHARED if len(g["scenes"]) > 1 else fmg_safe_name(g["scenes"][0])
@@ -426,23 +507,35 @@ def fmg_consolidate_plan(dest):
         e.update(state="planned", target=target, group=scene_dir + " / " + e["type"],
                  new=(fmg_to_smode(target, media_dirs) if dest else None) or target,
                  exists=os.path.exists(target))
-    return {"project": scan["project"], "dest": dest, "error": error, "entries": entries}
+    return {"project": scan["project"], "dest": dest, "error": error, "entries": entries,
+            "free": fmg_free_space(dest) if dest else None}
 
 
 def fmg_copy_with_progress(src, dst, job):
+    """Copie par blocs dans un .fmgpart renomme a la fin ; le fichier partiel est supprime en cas d'erreur ou
+    d'annulation (sinon des Go de fichier tronque resteraient sur le disque)."""
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     tmp = dst + ".fmgpart"
-    with open(src, "rb") as fi, open(tmp, "wb") as fo:
-        while True:
-            if job.get("cancel"):
-                raise RuntimeError("annule")
-            buf = fi.read(8 * 1024 * 1024)
-            if not buf:
-                break
-            fo.write(buf)
-            job["done_bytes"] += len(buf)
-    shutil.copystat(src, tmp)
-    os.replace(tmp, dst)
+    done0 = job["done_bytes"]
+    try:
+        with open(src, "rb") as fi, open(tmp, "wb") as fo:
+            while True:
+                if job.get("cancel"):
+                    raise RuntimeError("annule")
+                buf = fi.read(8 * 1024 * 1024)
+                if not buf:
+                    break
+                fo.write(buf)
+                job["done_bytes"] += len(buf)
+        shutil.copystat(src, tmp)
+        os.replace(tmp, dst)
+    except BaseException:
+        job["done_bytes"] = done0
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def fmg_consolidate_job(dest, selected):
@@ -454,6 +547,10 @@ def fmg_consolidate_job(dest, selected):
         todo = [e for e in plan["entries"] if e["state"] == "planned" and (selected is None or e["old"] in selected)]
         job["total"] = len(todo)
         job["total_bytes"] = sum(e["size"] for e in todo if not e["exists"])
+        free = fmg_free_space(plan["dest"])
+        if free is not None and job["total_bytes"] > free:
+            raise RuntimeError("Espace insuffisant sur le disque de destination : %s a copier, %s libres."
+                               % (fmg_fmt_size(job["total_bytes"]), fmg_fmt_size(free)))
         for i, e in enumerate(todo):
             if job.get("cancel"):
                 break
@@ -529,6 +626,12 @@ class FmgHandler(BaseHTTPRequestHandler):
                 origin and origin not in ("http://127.0.0.1:%d" % port_, "http://localhost:%d" % port_)):
             return self._send(403, {"error": "acces refuse"})
         path = urllib.parse.urlparse(self.path).path
+        # L'API n'accepte que POST : une page web etrangere peut declencher un GET (<img src=...>) sans en-tete
+        # Origin, mais un POST de sa part porte toujours son Origin (refuse ci-dessus).
+        if path.startswith("/api/") and method != "POST":
+            return self._send(405, {"error": "methode non autorisee"})
+        if method == "GET" and path not in ("/", "/index.html"):
+            return self._send(404, {"error": "introuvable"})
         if method == "GET" and path in ("/", "/index.html"):
             body = FMG_HTML.replace("__VERSION__", FMG_VERSION).encode("utf-8")
             self.send_response(200)
@@ -557,8 +660,8 @@ class FmgHandler(BaseHTTPRequestHandler):
 
 def fmg_api(path, data):
     if path == "/api/info":
-        return {"version": FMG_VERSION, "mediaDirs": [{"name": n, "dir": d, "readOnly": ro}
-                                                     for n, d, ro in fmg_media_dirs()]}
+        return {"version": FMG_VERSION, "alive": fmg_alive(),
+                "mediaDirs": [{"name": n, "dir": d, "readOnly": ro} for n, d, ro in fmg_media_dirs()]}
     if path == "/api/scan":
         scan = fmg_main("scan")
         return {"project": scan["project"], "items": fmg_items_view(scan, fmg_media_dirs())}
@@ -634,17 +737,17 @@ header{display:flex;align-items:center;gap:16px;padding:12px 20px;background:var
 .logo{font-weight:700;letter-spacing:.06em}.logo small{color:var(--mut);font-weight:400;margin-left:6px;letter-spacing:0}
 .proj{color:var(--mut)}.proj b{color:var(--fg)}
 .dot{width:9px;height:9px;border-radius:50%;background:var(--grey);display:inline-block;margin-right:6px}
-.dot.on{background:var(--ok)}.dot.off{background:var(--red)}
+.dot.on{background:var(--ok)}.dot.off{background:var(--red)}.dot.warn{background:var(--amber)}
 .sp{flex:1}
 nav{display:flex;gap:4px;padding:0 20px;background:var(--panel);border-bottom:1px solid var(--line)}
 nav button{background:none;border:0;color:var(--mut);padding:11px 16px;border-bottom:2px solid transparent;font-weight:600}
-nav button.on{color:var(--fg);border-bottom-color:var(--acc)}
+nav button.on{color:var(--fg);border-bottom-color:var(--acc)}nav button:hover{color:var(--fg)}
 main{flex:1;overflow:auto;padding:20px}
 .tab{display:none;max-width:1250px;margin:0 auto}.tab.on{display:block}
 .btn{background:var(--card2);color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:7px 14px}
 .btn:hover{border-color:var(--acc)}.btn.pri{background:var(--acc);border-color:var(--acc);color:#fff}
 .btn.pri:hover{background:var(--acc2)}.btn:disabled{opacity:.45;cursor:default}
-.btn.sm{padding:2px 9px;font-size:12px;border-radius:5px}.btn.danger{border-color:var(--red);color:var(--red)}
+.btn.sm{padding:2px 9px;font-size:12px;border-radius:5px}
 .box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
 .box h2{margin:0 0 4px;font-size:15px}.box p.help{margin:0 0 12px;color:var(--mut);font-size:13px}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -670,12 +773,12 @@ label.chk{display:inline-flex;gap:7px;align-items:center;color:var(--fg);cursor:
 .chips{display:flex;gap:6px;flex-wrap:wrap}
 .chip{display:inline-flex;align-items:center;gap:6px;background:var(--code);border:1px solid var(--line);
 border-radius:999px;padding:3px 6px 3px 11px;font:12px Consolas,monospace}
-.chip button{background:none;border:0;color:var(--mut);padding:0 4px;font-size:14px}.chip button:hover{color:var(--red)}
+.chip button{background:none;border:0;color:var(--mut);padding:0 4px;font-size:14px}.chip button:hover{color:var(--acc)}
 .tiles{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
 .tile{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--c);border-radius:9px;
 padding:9px 14px;min-width:116px;text-align:left;color:var(--fg)}
 .tile b{display:block;font-size:21px;color:var(--c);line-height:1.2}.tile span{color:var(--mut);font-size:12px}
-.tile.off{opacity:.35}
+.tile.off{opacity:.35}.tile:hover{border-color:var(--acc);border-left-color:var(--c)}
 .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
 .toolbar input[type=text]{flex:0 1 340px;min-width:200px}
 .list .it{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--c);border-radius:9px;
@@ -794,8 +897,11 @@ function base(p){p=String(p||'').replace(/\\/g,'/');return p.split('/').pop()}
 function fmt(n){if(!n)return '';var u=['o','Ko','Mo','Go','To'],i=0;while(n>=1024&&i<4){n/=1024;i++}return n.toFixed(i?1:0)+' '+u[i]}
 function toast(m,bad){var t=$('toast');t.textContent=m;t.className='on'+(bad?' bad':'');clearTimeout(t._h);t._h=setTimeout(function(){t.className=''},3500)}
 function api(path,data){return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data||{})})
- .then(function(r){return r.json().then(function(j){$('dot').className='dot on';if(!r.ok)throw new Error(j.error||r.status);return j})},
- function(e){$('dot').className='dot off';throw new Error('Smode ne repond pas')})}
+ .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||r.status);return j})},
+ function(e){setDot(null);throw new Error('Smode ne repond pas (serveur arrete ?)')})}
+/* voyant : vert = Smode traite les demandes, orange = serveur joignable mais Script inactif, rouge = serveur injoignable */
+function setDot(alive){var d=$('dot');d.className='dot '+(alive===null?'off':alive?'on':'warn');
+ d.title=alive===null?'Serveur injoignable':alive?'Connecte a Smode':'Le Script ne tourne plus dans Smode (projet ferme, Script supprime ou inactif ?)'}
 function copy(t){if(navigator.clipboard)navigator.clipboard.writeText(t);toast('Copie : '+t)}
 function tools(abs){if(!abs)return '';var a=esc(abs);return ' <button class="btn sm" data-reveal="'+a+'">Explorateur</button>'+
  ' <button class="btn sm" data-copy="'+a+'">Copier</button>'}
@@ -844,7 +950,8 @@ function renderFolders(){$('r-folders').innerHTML=S.rFolders.length?S.rFolders.m
 function addFolder(p){p=String(p||'').trim().replace(/^["']|["']$/g,'');if(p&&S.rFolders.indexOf(p)<0)S.rFolders.push(p);renderFolders()}
 $('r-addbtn').onclick=function(){addFolder($('r-add').value);$('r-add').value=''};
 $('r-add').onkeydown=function(e){if(e.key==='Enter')$('r-addbtn').onclick()};
-$('r-browse').onclick=function(){api('/api/browse',{initial:S.rFolders[0]||''}).then(function(r){if(r.path)addFolder(r.path)})};
+$('r-browse').onclick=function(){api('/api/browse',{initial:S.rFolders[0]||''}).then(function(r){if(r.path)addFolder(r.path)})
+ .catch(function(e){toast(e.message,1)})};
 $('r-run').onclick=function(){$('r-out').innerHTML='<div class="empty"><span class="spin"></span> Recherche des fichiers manquants...</div>';
  api('/api/relocate/analyze',{folders:S.rFolders,allowAbsolute:$('r-abs').checked}).then(function(r){
   r.entries.forEach(function(e){e.sel=(e.state==='found'||e.state==='found_abs');e.pick=-1});S.reloc=r;S.rFilter='*';renderReloc();
@@ -854,6 +961,8 @@ function renderReloc(){var r=S.reloc;if(!r)return;var order=['failed','notfound'
  var n=r.entries.filter(function(e){return e.sel&&(e.new||e.pick>=0)}).length;
  var h='<div class="tiles" id="r-tiles"></div><div class="toolbar"><span class="expl">'+r.entries.length+' fichier(s) manquant(s) &middot; dossiers fouilles : '+
   r.folders.map(esc).join(' ; ')+'</span><div class="sp"></div><button class="btn pri" id="r-apply"'+(n?'':' disabled')+'>Appliquer la selection ('+n+')</button></div>';
+ if(r.badFolders&&r.badFolders.length)h='<div class="err">Dossier(s) introuvable(s), ignore(s) : '+r.badFolders.map(esc).join(' ; ')+
+  '. Verifier le chemin (faute de frappe, disque deconnecte ?).</div>'+h;
  if(!r.entries.length)h+='<div class="empty">Aucun fichier manquant dans le projet.</div>';
  h+='<div class="list">';
  r.entries.forEach(function(e,i){if(S.rFilter!=='*'&&e.state!==S.rFilter)return;
@@ -881,8 +990,10 @@ function applyReloc(){var r=S.reloc,ch=[],map={};
  api('/api/relocate/apply',{changes:ch}).then(function(res){var pend=[];
   Object.keys(res.results).forEach(function(old){var e=map[old],s=res.results[old];var abs=e.state==='found_abs'||(e.state==='ambiguous'&&e.cands[e.pick].absolute);
    if(e.state==='ambiguous'){e.abs=e.cands[e.pick].abs;e.new=e.cands[e.pick].new;e.cands=null}
-   e.sel=false;e.state=s==='ok'?(abs?'applied_abs':'applied'):s==='pending'?'pending':'failed';if(s==='pending')pend.push(e.new)});
-  renderReloc();toast(ch.length+' fichier(s) rebranche(s)');scan();if(pend.length)watchPending(pend,'reloc')})
+   e.isAbs=abs;e.sel=false;e.state=s==='ok'?(abs?'applied_abs':'applied'):s==='pending'?'pending':'failed';
+   if(s==='failed')e.err='Reference introuvable dans le projet (deja modifiee ?) : relancer Analyser.';if(s==='pending')pend.push(e.new)});
+  renderReloc();toast(ch.length+' fichier(s) rebranche(s) - penser a enregistrer le projet Smode (Ctrl+S)');scan();
+  if(pend.length)watchPending(pend,'reloc')})
  .catch(function(e){toast(e.message,1);renderReloc()})}
 
 /* ---------------- CONSOLIDATE ---------------- */
@@ -908,16 +1019,20 @@ $('c-mdref').onclick=function(){mdRefresh(false)};
 /* destination hors Media Directory : on relit la liste toutes les 3 s (Smode l'enregistre en differe) */
 setInterval(function(){if(S.plan&&S.plan.error&&$('c-dest').value&&!(S.job&&S.job.running)){var n=S.dirs.length;
  loadInfo().then(function(){if(S.dirs.length!==n){toast('Nouveau Media Directory detecte');$('c-run').onclick()}})}},3000);
-$('c-browse').onclick=function(){api('/api/browse',{initial:$('c-dest').value}).then(function(r){if(r.path){$('c-dest').value=r.path;syncMd()}})};
+$('c-browse').onclick=function(){api('/api/browse',{initial:$('c-dest').value}).then(function(r){if(r.path){$('c-dest').value=r.path;syncMd()}})
+ .catch(function(e){toast(e.message,1)})};
 $('c-run').onclick=function(){$('c-out').innerHTML='<div class="empty"><span class="spin"></span> Analyse...</div>';
  api('/api/consolidate/plan',{dest:$('c-dest').value}).then(function(r){r.entries.forEach(function(e){e.sel=e.state==='planned'});S.plan=r;S.cFilter='*';renderPlan()})
  .catch(function(e){$('c-out').innerHTML='<div class="err">'+esc(e.message)+'</div>'})};
 function renderPlan(){var r=S.plan;if(!r)return;var order=['failed','missing','pending','planned','copied','reused','inplace','pack'];
  var sel=r.entries.filter(function(e){return e.sel&&e.state==='planned'});
  var bytes=sel.reduce(function(a,e){return a+(e.exists?0:(e.size||0))},0);
+ var full=r.free!=null&&bytes>r.free;
  var h=r.error?'<div class="err">'+esc(r.error)+'</div>':'';
+ if(full&&!r.error)h+='<div class="err">Espace insuffisant sur le disque de destination : '+fmt(bytes)+' a copier, '+(fmt(r.free)||'0 o')+' libres.</div>';
  h+='<div class="tiles" id="c-tiles"></div><div class="toolbar"><span class="expl">Destination <code>'+esc(r.dest||'-')+'</code> &middot; '+sel.length+
-  ' fichier(s), '+fmt(bytes)+' a copier</span><div class="sp"></div><button class="btn pri" id="c-go"'+(sel.length&&!r.error?'':' disabled')+'>Consolider la selection</button></div>';
+  ' fichier(s), '+(fmt(bytes)||'0 o')+' a copier'+(r.free!=null?' &middot; '+(fmt(r.free)||'0 o')+' libres':'')+'</span><div class="sp"></div>'+
+  '<button class="btn pri" id="c-go"'+(sel.length&&!r.error&&!full?'':' disabled')+'>Consolider la selection</button></div>';
  h+='<div id="c-prog"></div>';
  var groups={},rest=[];r.entries.forEach(function(e,i){e._i=i;if(S.cFilter!=='*'&&e.state!==S.cFilter)return;if(e.group)(groups[e.group]=groups[e.group]||[]).push(e);else rest.push(e)});
  Object.keys(groups).sort().forEach(function(g){h+='<div class="grp">'+esc(g)+'</div><div class="list">'+groups[g].map(planItem).join('')+'</div>'});
@@ -936,7 +1051,7 @@ function startJob(){var r=S.plan;var sel=r.entries.filter(function(e){return e.s
 function renderJob(){var j=S.job,el=$('c-prog');if(!el||!j)return;var pc=j.total_bytes?Math.round(100*j.done_bytes/j.total_bytes):(j.total?Math.round(100*(j.index||0)/j.total):0);
  el.innerHTML='<div class="box"><div class="row"><b>'+(j.running?'Copie en cours':'Termine')+'</b><span class="expl">'+(j.index||0)+' / '+(j.total||0)+' &middot; '+
   fmt(j.done_bytes)+' / '+fmt(j.total_bytes)+'</span><span class="mono expl">'+esc(j.current||'')+'</span><div class="sp"></div>'+
-  (j.running?'<button class="btn sm danger" id="c-cancel">Annuler</button>':'')+'</div><div class="prog" style="margin-top:10px"><i style="width:'+pc+'%"></i></div>'+
+  (j.running?'<button class="btn sm" id="c-cancel">Annuler</button>':'')+'</div><div class="prog" style="margin-top:10px"><i style="width:'+pc+'%"></i></div>'+
   (j.error?'<div class="err" style="margin:10px 0 0">'+esc(j.error)+'</div>':'')+'</div>';
  var c=$('c-cancel');if(c)c.onclick=function(){api('/api/consolidate/cancel')}}
 function pollJob(){fetch('/api/job',{method:'POST'}).then(function(r){return r.json()}).then(function(j){S.job=j;
@@ -944,18 +1059,27 @@ function pollJob(){fetch('/api/job',{method:'POST'}).then(function(r){return r.j
  S.plan.entries.forEach(function(e){var x=byOld[e.old];if(x){e.state=x.state;e.err=x.error;e.sel=false}});
  if(j.running){renderJob();var el=$('c-prog');if(!el)renderPlan();setTimeout(pollJob,500)}
  else{renderPlan();renderJob();scan();var pend=(j.results||[]).filter(function(x){return x.state==='pending'}).map(function(x){return x.new});
-  toast('Consolidate termine');if(pend.length)watchPending(pend,'plan')}})}
+  toast(j.error?'Consolidate interrompu : '+j.error:'Consolidate termine - penser a enregistrer le projet Smode (Ctrl+S)',!!j.error);
+  if(pend.length)watchPending(pend,'plan')}},
+ function(){toast('Smode ne repond pas, nouvel essai...',1);setTimeout(pollJob,2000)})}
 
 /* ---------------- verification des fichiers en attente ---------------- */
-function watchPending(paths,where,n){n=n||0;if(n>20||!paths.length)return;setTimeout(function(){api('/api/check',{paths:paths}).then(function(res){
- var left=paths.filter(function(p){return res[p]!=='ok'});
- if(where==='reloc'&&S.reloc)S.reloc.entries.forEach(function(e){if(e.state==='pending'&&res[e.new]==='ok')e.state='applied'});
- if(where==='plan'&&S.plan)S.plan.entries.forEach(function(e){if(e.state==='pending'&&res[e.new]==='ok')e.state='copied'});
- if(left.length<paths.length){where==='reloc'?renderReloc():renderPlan();scan()}
- watchPending(left,where,n+1)})},2000)}
+/* revérifie toutes les 2 s (40 s max) ; un seul rescan du projet a la fin (un scan gele Smode quelques
+   secondes sur un gros projet) ; au-dela, les fichiers jamais reconnus passent en Echec avec une explication */
+function watchPending(paths,where,n){n=n||0;var list=where==='reloc'?(S.reloc&&S.reloc.entries):(S.plan&&S.plan.entries);
+ function redraw(){where==='reloc'?renderReloc():renderPlan()}
+ if(!paths.length){scan();return}
+ if(n>=20){(list||[]).forEach(function(e){if(e.state==='pending'&&paths.indexOf(e.new)>=0){e.state='failed';
+   e.err='Smode ne reconnait toujours pas ce fichier : verifier qu\'il est lisible (format, droits), puis relancer Analyser.'}});
+  redraw();scan();return}
+ setTimeout(function(){api('/api/check',{paths:paths}).then(function(res){
+  var left=paths.filter(function(p){return res[p]!=='ok'});
+  (list||[]).forEach(function(e){if(e.state==='pending'&&res[e.new]==='ok')e.state=where==='reloc'?(e.isAbs?'applied_abs':'applied'):'copied'});
+  if(left.length<paths.length)redraw();
+  watchPending(left,where,n+1)},function(){watchPending(paths,where,n+1)})},2000)}
 
 /* ---------------- MEDIA DIRECTORIES ---------------- */
-function loadInfo(){return api('/api/info').then(function(r){S.dirs=r.mediaDirs;
+function loadInfo(){return api('/api/info').then(function(r){S.dirs=r.mediaDirs;setDot(!!r.alive);
  $('d-list').innerHTML='<table><tr><th>Nom</th><th>Dossier</th><th></th></tr>'+r.mediaDirs.map(function(d){return '<tr><td><b>'+esc(d.name)+'</b>'+
   (d.readOnly?' <span class="type">lecture seule</span>':'')+'</td><td class="mono">'+esc(d.dir)+'</td><td>'+tools(d.dir)+'</td></tr>'}).join('')+'</table>';
  $('c-md').innerHTML='<option value="">Media Directories...</option>'+r.mediaDirs.filter(function(d){return !d.readOnly}).map(function(d){
@@ -968,6 +1092,7 @@ function makeDD(sel){var w=document.createElement('div');w.className='dd';sel.pa
  var btn=document.createElement('button');btn.type='button';btn.className='dd-btn';btn.title=sel.title||'';
  btn.innerHTML='<span class="dd-lab"></span><svg width="10" height="6" viewBox="0 0 10 6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
  var list=document.createElement('div');list.className='dd-list';w.appendChild(btn);w.appendChild(list);
+ list.onmousedown=function(e){e.preventDefault()};   /* garde le focus : la barre de defilement ne ferme plus la liste */
  sel._dd={btn:btn,lab:btn.firstChild};var act=-1,opts=[];
  function close(){w.classList.remove('open')}
  function mark(){opts.forEach(function(o,i){o.el.classList.toggle('act',i===act)});if(opts[act])opts[act].el.scrollIntoView({block:'nearest'})}
@@ -987,7 +1112,8 @@ function makeDD(sel){var w=document.createElement('div');w.className='dd';sel.pa
  ddRefresh(sel)}
 makeDD($('m-scope'));makeDD($('c-md'));
 renderFolders();loadInfo();scan();
-setInterval(function(){fetch('/api/info',{method:'POST'}).then(function(){$('dot').className='dot on'},function(){$('dot').className='dot off'})},5000);
+setInterval(function(){fetch('/api/info',{method:'POST'}).then(function(r){return r.json()}).then(function(j){setDot(!!j.alive)},
+ function(){setDot(null)})},5000);
 </script></body></html>"""
 
 
@@ -996,10 +1122,13 @@ _fmg_port = int(script.port.get())
 for _t in ("SERVEUR", "ETAT"):
     if str(getattr(script, _t)) != "-" * 40:
         setattr(script, _t, "-" * 40)
-if not _FMG["servers"] or _FMG["version"] != FMG_VERSION or _FMG["port"] != _fmg_port or script.restartServer.get():
-    if script.restartServer.get():
+# (Re)demarrage seulement au premier passage, si la version ou le port change, ou sur Restart Server.
+# Un echec (port deja pris) n'est PAS retente a chaque frame : changer le port ou cocher Restart Server.
+_fmg_restart = bool(script.restartServer.get())
+if _FMG["version"] != FMG_VERSION or _FMG["port"] != _fmg_port or _fmg_restart:
+    if _fmg_restart:
         script.restartServer.set(False)
-    _first = not _FMG["servers"] and _FMG["version"] is None
+    _first = _FMG["version"] is None
     _url = fmg_start_server(_fmg_port)
     script.status = _url
     if _url.startswith("http") and (script.openInterface.get() or (_first and script.autoOpen.get())):
@@ -1009,4 +1138,5 @@ if script.openInterface.get():
     script.openInterface.set(False)
     if _FMG["servers"]:
         fmg_open_window("http://127.0.0.1:%d" % _fmg_port)
+_FMG["tick"] = time.time()
 fmg_process_queue()

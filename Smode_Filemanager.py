@@ -10,7 +10,7 @@
 # __________________________________________ ___________________________________________
 # |                                       | |                                         |
 # |    SMODE FILEMANAGER                  | | RELOCATE : retrouve les fichiers        |
-# |       V0.5                            | | manquants meme deplaces et repartis     |
+# |       V0.6                            | | manquants meme deplaces et repartis     |
 # |    Relocate + Consolidate             | | autrement (recherche par nom).          |
 # |_______________________________________| |_________________________________________|
 # |    Instructions :                     | | CONSOLIDATE : copie les medias dans     |
@@ -43,6 +43,11 @@
 #                      autour des chemins saisis (Search Folders / Consolidate Folder).
 #                      Fichier copie pas encore indexe par Smode : reload + etat "En attente Smode"
 #                      (au lieu de "Echec"), aussi detecte au passage suivant.
+# V0.6 - 08/10/2026 - Relecture du code, corrections : dossiers de recherche imbriques (un meme fichier
+#                      n'est plus compte deux fois -> faux "ambigu") ; Media Directory a la racine d'un
+#                      lecteur reconnu ; copie via .fmgpart supprime en cas d'erreur + controle de l'espace
+#                      libre ; controle "destination en lecture seule" exact (plus de faux positif par prefixe) ;
+#                      Scene nommee CON, NUL, AUX, COM1... : dossier prefixe par _ (nom reserve Windows).
 #
 
 # =============== OPTIONS (visibles/modifiables dans le panneau du Script) ===============
@@ -107,12 +112,17 @@ def from_smode_path(path, media_dirs):
     return None
 
 
+def _root(d):
+    """Dossier normalise pour comparer des chemins, sans separateur final (gere la racine d'un lecteur, ex. G:\\)."""
+    return os.path.normcase(os.path.abspath(d)).rstrip(os.sep)
+
+
 def to_smode_path(abs_path, media_dirs):
     """Chemin disque -> 'NomMediaDirectory/sous/dossier/fichier' (le Media Directory le plus profond gagne)."""
     p = os.path.normcase(os.path.abspath(abs_path))
     best = None
     for name, d, _ in media_dirs:
-        root = os.path.normcase(os.path.abspath(d))
+        root = _root(d)
         if p.startswith(root + os.sep) and (best is None or len(root) > len(best[1])):
             best = (name, root)
     if best is None:
@@ -185,14 +195,24 @@ def is_missing(ref):
 
 # ----------------------------- Recherche disque -----------------------------
 def build_index(folders):
-    """nom de fichier (minuscule) -> [chemins absolus]. Ignore les .meta de Smode."""
-    index = {}
-    for root_dir in folders:
+    """nom de fichier (minuscule) -> [chemins absolus]. Ignore les .meta de Smode. Un dossier contenu dans un autre
+    de la liste n'est parcouru qu'une fois, et un meme fichier n'est jamais compte deux fois (sinon faux "ambigu")."""
+    roots = []                                    # (cle normalisee, dossier tel que saisi : on garde sa casse)
+    for f in sorted(folders, key=lambda x: len(_root(x))):
+        k = _root(f)
+        if not any(k == rk or k.startswith(rk + os.sep) for rk, _ in roots):
+            roots.append((k, f))
+    index, seen = {}, set()
+    for _, root_dir in roots:
         for dirpath, _, filenames in os.walk(root_dir):
             for f in filenames:
                 if f.lower().endswith(".meta"):
                     continue
-                index.setdefault(f.lower(), []).append(os.path.join(dirpath, f))
+                full = os.path.join(dirpath, f)
+                key = os.path.normcase(os.path.abspath(full))
+                if key not in seen:
+                    seen.add(key)
+                    index.setdefault(f.lower(), []).append(full)
     return index
 
 
@@ -454,6 +474,8 @@ def media_type_folder(ref_class, path):
 def _safe_name(name):
     """Nom de Scene -> nom de dossier Windows valide."""
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip().rstrip(".")
+    if re.match(r"^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$", name, re.I):   # noms reserves par Windows
+        name = "_" + name
     return name or "_SANS_NOM"
 
 
@@ -462,6 +484,27 @@ def _same_file(a, b):
         return os.path.getsize(a) == os.path.getsize(b) and int(os.path.getmtime(a)) == int(os.path.getmtime(b))
     except OSError:
         return False
+
+
+def _copy_file(src, dst):
+    """Copie via un fichier .fmgpart renomme a la fin : en cas d'erreur (disque plein...) le fichier partiel est
+    supprime au lieu de rester sur le disque. Verifie d'abord l'espace libre."""
+    import shutil
+    free = shutil.disk_usage(os.path.dirname(dst)).free
+    size = os.path.getsize(src)
+    if size > free:
+        raise RuntimeError("espace insuffisant sur le disque de destination (%d Mo a copier, %d Mo libres)"
+                           % (size // 1048576, free // 1048576))
+    tmp = dst + ".fmgpart"
+    try:
+        shutil.copy2(src, tmp)
+        os.replace(tmp, dst)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def consolidate(project, dest_folder, apply=False, open_report=False):
@@ -475,7 +518,7 @@ def consolidate(project, dest_folder, apply=False, open_report=False):
         error = ("Le dossier de destination n'est dans aucun Media Directory : l'ajouter comme Media Directory "
                  "dans Smode (ou choisir un dossier qui en fait partie), puis relancer. Si tu viens de l'ajouter : "
                  "Smode enregistre la liste avec quelques secondes de retard, attendre un peu et relancer.")
-    elif any(ro and os.path.normcase(dest).startswith(os.path.normcase(os.path.abspath(d))) for _, d, ro in media_dirs):
+    elif any(ro and (_root(dest) + os.sep).startswith(_root(d) + os.sep) for _, d, ro in media_dirs):
         error = "Le dossier de destination est dans un Media Directory en lecture seule."
 
     # source absolue -> {refs, users, scenes, ref_class, smode_path}
@@ -516,11 +559,11 @@ def consolidate(project, dest_folder, apply=False, open_report=False):
         f = files[src]
         e = {"old": f["smode"], "old_abs": src, "users": f["users"]}
         entries.append(e)
-        ro = [d for _, d, r in media_dirs if r and os.path.normcase(src).startswith(os.path.normcase(os.path.abspath(d)) + os.sep)]
+        ro = [d for _, d, r in media_dirs if r and os.path.normcase(src).startswith(_root(d) + os.sep)]
         if ro:
             e["state"] = "pack"
             continue
-        if dest and os.path.normcase(src).startswith(os.path.normcase(dest) + os.sep):
+        if dest and os.path.normcase(src).startswith(_root(dest) + os.sep):
             e["state"] = "inplace"
             continue
         scene_dir = SHARED_FOLDER if len(f["scenes"]) > 1 else _safe_name(next(iter(f["scenes"])))
@@ -539,7 +582,7 @@ def consolidate(project, dest_folder, apply=False, open_report=False):
             reused = os.path.exists(target)
             if not reused:
                 os.makedirs(folder, exist_ok=True)
-                shutil.copy2(src, target)
+                _copy_file(src, target)
             for ref in f["refs"]:
                 ref.path.set(new)
             still = [r for r in f["refs"] if is_missing(r)]
